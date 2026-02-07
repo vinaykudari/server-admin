@@ -24,9 +24,13 @@ function parseMessageId(cmd: string): string | null {
 }
 
 function pickPrimaryProcess(procs: ActiveProcess[]): ActiveProcess {
-  // Prefer the wrapper command; it contains the user-facing prompt snippet.
-  const wrapper = procs.find((p) => p.cmd.includes("/usr/local/bin/codex exec"));
-  return wrapper ?? procs[0]!;
+  // Prefer the process that includes the Telegram message id, which tends to be the user-facing invocation.
+  const withMsgId = procs.find((p) => /\[message_id:\s*\d+\]/.test(p.cmd));
+  if (withMsgId) return withMsgId;
+
+  // Otherwise, prefer the actual codex exec command (not helper shells).
+  const codex = procs.find((p) => /\bcodex\b.*\bexec\b/.test(p.cmd));
+  return codex ?? procs[0]!;
 }
 
 function findStartedAt(events: ActionEvent[], messageId: string): string | undefined {
@@ -38,32 +42,6 @@ function findStartedAt(events: ActionEvent[], messageId: string): string | undef
     if (hay.includes(`[message_id: ${messageId}]`)) return e.ts;
   }
   return undefined;
-}
-
-async function resolveGatewayContainerId(): Promise<string> {
-  const { stdout } = await execFileAsync(
-    "docker",
-    ["ps", "--format", "{{.ID}} {{.Names}}"],
-    { timeout: 5000, maxBuffer: 1024 * 1024 },
-  );
-
-  const lines = stdout
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const [id, name] = line.split(/\s+/, 2);
-    if (name === "openclaw-openclaw-gateway-1" && id) return id;
-  }
-
-  for (const line of lines) {
-    const [id, name] = line.split(/\s+/, 2);
-    if (!id || !name) continue;
-    if (name.includes("openclaw") && name.includes("gateway")) return id;
-  }
-
-  throw new Error("OpenClaw gateway container not found");
 }
 
 export async function listActiveJobs(): Promise<{ jobs: ActiveJob[]; warning?: string }> {
@@ -78,7 +56,8 @@ export async function listActiveJobs(): Promise<{ jobs: ActiveJob[]; warning?: s
     const id = parseMessageId(p.cmd);
     if (!id) continue;
     const arr = byMessageId.get(id) ?? [];
-    arr.push(p);
+    // De-dupe by pid; the same process can appear multiple times if ps output is odd.
+    if (!arr.some((x) => x.pid === p.pid)) arr.push(p);
     byMessageId.set(id, arr);
   }
 
@@ -106,32 +85,29 @@ export async function listActiveJobs(): Promise<{ jobs: ActiveJob[]; warning?: s
 }
 
 export async function resolveGatewayLogPath(): Promise<string> {
-  const container = await resolveGatewayContainerId();
   const { stdout } = await execFileAsync(
-    "docker",
-    ["exec", container, "sh", "-lc", "ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 1"],
+    "sh",
+    ["-lc", "ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 1"],
     { timeout: 5000, maxBuffer: 1024 * 1024 },
   );
-  const path = stdout.trim();
-  if (!path) throw new Error("OpenClaw gateway log file not found in /tmp/openclaw");
-  return path;
+  const p = stdout.trim();
+  if (!p) throw new Error("OpenClaw gateway log file not found in /tmp/openclaw");
+  return p;
 }
 
 export async function readGatewayLogRecent(tailLines: number): Promise<string[]> {
-  const container = await resolveGatewayContainerId();
   const logPath = await resolveGatewayLogPath();
   const safe = Number.isFinite(tailLines) ? Math.max(50, Math.min(2000, tailLines)) : 300;
   const { stdout } = await execFileAsync(
-    "docker",
-    ["exec", container, "sh", "-lc", `tail -n ${safe} ${logPath}`],
-    { timeout: 5000, maxBuffer: 1024 * 1024 },
+    "tail",
+    ["-n", String(safe), logPath],
+    { timeout: 5000, maxBuffer: 8 * 1024 * 1024 },
   );
   return stdout
     .split("\n")
     .map((l) => l.replace(/\r$/, ""))
     .filter(Boolean);
 }
-
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -162,7 +138,10 @@ export async function resolveJobOutputPath(messageId: string): Promise<string> {
   return path.join(codexLogsDir, candidates[0]!);
 }
 
-export async function readJobOutputRecent(messageId: string, tailLines: number): Promise<{ path: string; lines: string[] }> {
+export async function readJobOutputRecent(
+  messageId: string,
+  tailLines: number,
+): Promise<{ path: string; lines: string[] }> {
   const filePath = await resolveJobOutputPath(messageId);
   const safe = Number.isFinite(tailLines) ? Math.max(50, Math.min(2000, tailLines)) : 300;
   const { stdout } = await execFileAsync(

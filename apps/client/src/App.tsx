@@ -8,6 +8,7 @@ import { Tabs } from "./components/Tabs";
 import { JobsTable } from "./components/JobsTable";
 import { ActionsFeed } from "./components/ActionsFeed";
 import { LogLines } from "./components/LogLines";
+import { CodexLogViewer } from "./components/CodexLogViewer";
 import { useLogs } from "./hooks/useLogs";
 import { useActiveJobs } from "./hooks/useActiveJobs";
 import { useActionsStream } from "./hooks/useActionsStream";
@@ -124,7 +125,7 @@ function App() {
             {!selectedJob && <div className="state">Click an active job above to stream its Codex output.</div>}
             {selectedJob && jobPath && <div className="state">Log file: {jobPath}</div>}
             {selectedJob && jobError && <div className="state state--error">{jobError}</div>}
-            {selectedJob && <LogLines lines={jobLines} />}
+            {selectedJob && <CodexLogViewer lines={jobLines} />}
           </Panel>
 
           <Panel

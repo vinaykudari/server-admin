@@ -1,10 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// OpenClaw runs natively on the VM under the openclaw OS user.
-// Keep env override for future flexibility, but default to the native state dir.
-export const workspaceRoot =
-  process.env.WORKSPACE_ROOT ?? "/home/openclaw/.openclaw/workspace";
+export const workspaceRoot = process.env.WORKSPACE_ROOT ?? "/root/.openclaw/workspace";
 
 export const runbookPath = path.join(workspaceRoot, "RUNBOOK.md");
 export const tasksPath = path.join(workspaceRoot, "TASKS.md");

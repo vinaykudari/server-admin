@@ -132,7 +132,6 @@ router.get("/jobs/gateway-log/stream", async (req: Request, res: Response) => {
 
   res.write(`event: ready\ndata: ${Date.now()}\n\n`);
 
-  const container = "openclaw-openclaw-gateway-1";
   let logPath: string;
   try {
     logPath = await resolveGatewayLogPath();
@@ -144,11 +143,8 @@ router.get("/jobs/gateway-log/stream", async (req: Request, res: Response) => {
   }
 
   // Stream JSON lines from the gateway log file.
-  const proc = spawn(
-    "docker",
-    ["exec", "-i", container, "sh", "-lc", `tail -n 0 -F ${logPath}`],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
+  // Stream JSON lines from the gateway log file (native host).
+  const proc = spawn("tail", ["-n", "0", "-F", logPath], { stdio: ["ignore", "pipe", "pipe"] });
 
   const keepAlive = setInterval(() => {
     res.write(`event: ping\ndata: ${Date.now()}\n\n`);
