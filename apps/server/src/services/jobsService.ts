@@ -118,9 +118,30 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-export async function resolveJobOutputPath(messageId: string): Promise<string> {
+async function resolveLatestIfSafe(messageId: string): Promise<string | null> {
   const latest = path.join(codexLogsDir, `msg${messageId}.latest.jsonl`);
-  if (await pathExists(latest)) return latest;
+
+  try {
+    const st = await fs.lstat(latest);
+
+    // Older Docker-era installs created symlinks pointing to /home/node/... which is wrong on native installs.
+    // If the "latest" pointer escapes the Codex logs directory, ignore it and fall back to timestamped files.
+    if (st.isSymbolicLink()) {
+      const real = await fs.realpath(latest);
+      const logsDir = path.resolve(codexLogsDir) + path.sep;
+      const resolved = path.resolve(real);
+      if (!resolved.startsWith(logsDir)) return null;
+    }
+
+    return latest;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveJobOutputPath(messageId: string): Promise<string> {
+  const latestOk = await resolveLatestIfSafe(messageId);
+  if (latestOk) return latestOk;
 
   if (!(await pathExists(codexLogsDir))) {
     throw new Error("Codex output directory not found yet; no jobs have written output logs.");

@@ -9,9 +9,10 @@ type State = {
   error: string | null;
   paused: boolean;
   setPaused: (v: boolean) => void;
+  reload: (tailLines?: number) => void;
 };
 
-const clamp = (arr: string[], max = 1200) => (arr.length > max ? arr.slice(arr.length - max) : arr);
+const clamp = (arr: string[], max = 4000) => (arr.length > max ? arr.slice(arr.length - max) : arr);
 
 export function useJobOutput(messageId: string | null): State {
   const [connected, setConnected] = useState(false);
@@ -19,6 +20,15 @@ export function useJobOutput(messageId: string | null): State {
   const [lines, setLines] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [tailLines, setTailLines] = useState<number>(1200);
+  const [reloadSeq, setReloadSeq] = useState(0);
+
+  const reload = (nextTailLines?: number) => {
+    if (typeof nextTailLines === "number" && Number.isFinite(nextTailLines) && nextTailLines > 0) {
+      setTailLines(Math.max(50, Math.min(20000, Math.floor(nextTailLines))));
+    }
+    setReloadSeq((s) => s + 1);
+  };
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -38,7 +48,7 @@ export function useJobOutput(messageId: string | null): State {
 
     const start = async () => {
       try {
-        const recent = await fetchJobOutputRecent(messageId, 200);
+        const recent = await fetchJobOutputRecent(messageId, tailLines);
         if (!cancelled) {
           setPath(recent.path);
           setLines(clamp(recent.lines));
@@ -93,7 +103,7 @@ export function useJobOutput(messageId: string | null): State {
       cancelled = true;
       if (es) es.close();
     };
-  }, [messageId, paused]);
+  }, [messageId, paused, tailLines, reloadSeq]);
 
-  return { connected, path, lines, error, paused, setPaused };
+  return { connected, path, lines, error, paused, setPaused, reload };
 }

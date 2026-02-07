@@ -50,6 +50,7 @@ function App() {
     error: jobError,
     paused: jobPaused,
     setPaused: setJobPaused,
+    reload: reloadJobOutput,
   } = useJobOutput(selectedJob);
 
   const lastUpdate = useMemo(() => {
@@ -114,9 +115,17 @@ function App() {
             subtitle={selectedJob ? (jobConnected ? "Live" : "Connecting") : "Select a job"}
             actions={
               selectedJob ? (
-                <button className="button button--ghost" onClick={() => setJobPaused(!jobPaused)}>
-                  {jobPaused ? "Resume" : "Pause"}
-                </button>
+                <div className="actionRow">
+                  <button className="button button--ghost" onClick={() => setJobPaused(!jobPaused)}>
+                    {jobPaused ? "Resume" : "Pause"}
+                  </button>
+                  <button className="button button--ghost" onClick={() => reloadJobOutput(2000)}>
+                    Load 2k
+                  </button>
+                  <button className="button button--ghost" onClick={() => reloadJobOutput(8000)}>
+                    Load 8k
+                  </button>
+                </div>
               ) : (
                 <span className="pill">CODEX</span>
               )

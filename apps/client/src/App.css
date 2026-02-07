@@ -146,3 +146,10 @@
     justify-content: space-between;
   }
 }
+
+.actionRow {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
