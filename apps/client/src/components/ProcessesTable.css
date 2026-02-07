@@ -1,0 +1,38 @@
+.procs {
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(2, 7, 14, 0.5);
+}
+
+.procs__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.procs__table th,
+.procs__table td {
+  text-align: left;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(85, 120, 160, 0.18);
+  vertical-align: top;
+}
+
+.procs__table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+
+.procs__mono {
+  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+  white-space: nowrap;
+}
+
+.procs__cmd {
+  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+  font-size: 0.85rem;
+  color: rgba(230, 242, 255, 0.9);
+  word-break: break-word;
+}

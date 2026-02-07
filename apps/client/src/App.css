@@ -125,3 +125,24 @@
     align-items: flex-start;
   }
 }
+
+.app__headerRight {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.grid--single {
+  grid-template-columns: 1fr;
+}
+
+.button--ghost {
+  background: rgba(6, 12, 20, 0.35);
+}
+
+@media (max-width: 720px) {
+  .app__headerRight {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
