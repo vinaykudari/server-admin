@@ -3,3 +3,4 @@ apps/*/node_modules/
 apps/*/dist/
 .DS_Store
 npm-debug.log*
+*.bak.*
