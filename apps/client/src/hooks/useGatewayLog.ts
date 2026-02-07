@@ -25,7 +25,10 @@ export function useGatewayLog(): State {
     const start = async () => {
       try {
         const recent = await fetchGatewayLogRecent(300);
-        if (!cancelled) setLines(clamp(recent.lines));
+        if (!cancelled) {
+          setLines(clamp(recent.lines));
+          if (recent.warning) setError(recent.warning);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Unknown error");
       }

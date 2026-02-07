@@ -12,6 +12,7 @@ import { useLogs } from "./hooks/useLogs";
 import { useActiveJobs } from "./hooks/useActiveJobs";
 import { useActionsStream } from "./hooks/useActionsStream";
 import { useGatewayLog } from "./hooks/useGatewayLog";
+import { useJobOutput } from "./hooks/useJobOutput";
 import type { LogDocument } from "./types";
 
 type TabId = "overview" | "live";
@@ -41,6 +42,14 @@ function App() {
   const { events, connected, error: actionsError, paused, setPaused } = useActionsStream();
   const { connected: gwConnected, lines: gwLines, error: gwError, paused: gwPaused, setPaused: setGwPaused } =
     useGatewayLog();
+  const {
+    connected: jobConnected,
+    path: jobPath,
+    lines: jobLines,
+    error: jobError,
+    paused: jobPaused,
+    setPaused: setJobPaused,
+  } = useJobOutput(selectedJob);
 
   const lastUpdate = useMemo(() => {
     if (!data) return "-";
@@ -97,6 +106,25 @@ function App() {
             {warning && <div className="state">Warning: {warning}</div>}
             {jobsError && <div className="state state--error">{jobsError}</div>}
             <JobsTable jobs={jobs} selected={selectedJob} onSelect={(id) => setSelectedJob(id)} />
+          </Panel>
+
+          <Panel
+            title={selectedJob ? `Job Output (message ${selectedJob})` : "Job Output"}
+            subtitle={selectedJob ? (jobConnected ? "Live" : "Connecting") : "Select a job"}
+            actions={
+              selectedJob ? (
+                <button className="button button--ghost" onClick={() => setJobPaused(!jobPaused)}>
+                  {jobPaused ? "Resume" : "Pause"}
+                </button>
+              ) : (
+                <span className="pill">CODEX</span>
+              )
+            }
+          >
+            {!selectedJob && <div className="state">Click an active job above to stream its Codex output.</div>}
+            {selectedJob && jobPath && <div className="state">Log file: {jobPath}</div>}
+            {selectedJob && jobError && <div className="state state--error">{jobError}</div>}
+            {selectedJob && <LogLines lines={jobLines} />}
           </Panel>
 
           <Panel

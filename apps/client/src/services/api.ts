@@ -3,6 +3,7 @@ import type {
   ActiveJobsPayload,
   ActiveSessionsPayload,
   GatewayLogRecentPayload,
+  JobOutputRecentPayload,
   LogsPayload,
 } from "../types";
 
@@ -44,4 +45,17 @@ export const fetchGatewayLogRecent = async (tail = 300): Promise<GatewayLogRecen
     throw new Error(`Failed to fetch gateway log: ${response.status}`);
   }
   return response.json() as Promise<GatewayLogRecentPayload>;
+};
+
+
+export const fetchJobOutputRecent = async (messageId: string, tail = 200): Promise<JobOutputRecentPayload> => {
+  const response = await fetch(
+    `/api/jobs/${encodeURIComponent(messageId)}/output/recent?tail=${encodeURIComponent(String(tail))}`,
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as unknown));
+    const msg = (body as { error?: string }).error;
+    throw new Error(msg ? `Job output unavailable: ${msg}` : `Failed to fetch job output: ${response.status}`);
+  }
+  return response.json() as Promise<JobOutputRecentPayload>;
 };

@@ -52,4 +52,11 @@ export type ActiveJobsPayload = {
 
 export type GatewayLogRecentPayload = {
   lines: string[];
+  warning?: string;
+};
+
+
+export type JobOutputRecentPayload = {
+  path: string;
+  lines: string[];
 };

@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import { readRecentActions, type ActionEvent } from "./actionsService.js";
 import type { ActiveProcess } from "./sessionsService.js";
 import { listActiveCodexProcesses } from "./sessionsService.js";
+import { codexLogsDir } from "../utils/paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -127,6 +130,53 @@ export async function readGatewayLogRecent(tailLines: number): Promise<string[]>
     .split("\n")
     .map((l) => l.replace(/\r$/, ""))
     .filter(Boolean);
+}
+
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveJobOutputPath(messageId: string): Promise<string> {
+  const latest = path.join(codexLogsDir, `msg${messageId}.latest.jsonl`);
+  if (await pathExists(latest)) return latest;
+
+  if (!(await pathExists(codexLogsDir))) {
+    throw new Error("Codex output directory not found yet; no jobs have written output logs.");
+  }
+
+  const entries = await fs.readdir(codexLogsDir);
+  const prefix = `msg${messageId}-`;
+  const candidates = entries.filter((n) => n.startsWith(prefix) && n.endsWith(".jsonl"));
+  if (candidates.length === 0) {
+    throw new Error(`No Codex output log found for message_id ${messageId}.`);
+  }
+
+  // Names include a UTC timestamp; lexicographic sort yields chronological order.
+  candidates.sort().reverse();
+  return path.join(codexLogsDir, candidates[0]!);
+}
+
+export async function readJobOutputRecent(messageId: string, tailLines: number): Promise<{ path: string; lines: string[] }> {
+  const filePath = await resolveJobOutputPath(messageId);
+  const safe = Number.isFinite(tailLines) ? Math.max(50, Math.min(2000, tailLines)) : 300;
+  const { stdout } = await execFileAsync(
+    "tail",
+    ["-n", String(safe), filePath],
+    { timeout: 5000, maxBuffer: 8 * 1024 * 1024 },
+  );
+
+  const lines = stdout
+    .split("\n")
+    .map((l) => l.replace(/\r$/, ""))
+    .filter(Boolean);
+
+  return { path: filePath, lines };
 }
 
 export async function readJobActions(messageId: string, limit: number): Promise<ActionEvent[]> {

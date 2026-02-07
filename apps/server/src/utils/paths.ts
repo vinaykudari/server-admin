@@ -7,6 +7,8 @@ export const runbookPath = path.join(workspaceRoot, "RUNBOOK.md");
 export const tasksPath = path.join(workspaceRoot, "TASKS.md");
 export const actionsLogPath = path.join(workspaceRoot, "logs", "actions.ndjson");
 
+export const codexLogsDir = path.join(workspaceRoot, "logs", "codex");
+
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFile);
 
