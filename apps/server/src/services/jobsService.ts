@@ -104,12 +104,12 @@ export async function listActiveJobs(): Promise<{ jobs: ActiveJob[]; warning?: s
     });
   }
 
-  // Stable ordering: newest first when we have startedAt, otherwise by message id desc.
+  // Ordering: message id desc (simple + predictable).
   jobs.sort((a, b) => {
-    if (a.startedAt && b.startedAt) return b.startedAt.localeCompare(a.startedAt);
-    if (a.startedAt) return -1;
-    if (b.startedAt) return 1;
-    return Number(b.messageId) - Number(a.messageId);
+    const ai = Number(a.messageId);
+    const bi = Number(b.messageId);
+    if (Number.isFinite(ai) && Number.isFinite(bi)) return bi - ai;
+    return String(b.messageId).localeCompare(String(a.messageId));
   });
 
   return { jobs };
