@@ -1,0 +1,15 @@
+{
+  "name": "server-admin",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/client",
+    "apps/server"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/server",
+    "build": "npm run build -w apps/client && npm run build -w apps/server",
+    "lint": "npm run lint -w apps/client && npm run lint -w apps/server",
+    "start": "npm run start -w apps/server"
+  }
+}

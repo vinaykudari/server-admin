@@ -1,0 +1,25 @@
+import path from "node:path";
+
+import express from "express";
+
+import logsRouter from "./routes/logs.js";
+import { clientDistPath } from "./utils/paths.js";
+
+const app = express();
+const port = Number(process.env.PORT ?? 4175);
+
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.use("/api", logsRouter);
+
+app.use(express.static(clientDistPath));
+
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(clientDistPath, "index.html"));
+});
+
+app.listen(port, () => {
+  console.log(`Server admin app listening on port ${port}`);
+});
