@@ -2,6 +2,7 @@ import type {
   ActionsRecentPayload,
   ActiveJobsPayload,
   ActiveSessionsPayload,
+  RecentJobsPayload,
   GatewayLogRecentPayload,
   JobOutputRecentPayload,
   LogsPayload,
@@ -45,6 +46,14 @@ export const fetchGatewayLogRecent = async (tail = 300): Promise<GatewayLogRecen
     throw new Error(`Failed to fetch gateway log: ${response.status}`);
   }
   return response.json() as Promise<GatewayLogRecentPayload>;
+};
+
+export const fetchRecentJobs = async (limit = 50): Promise<RecentJobsPayload> => {
+  const response = await fetch(`/api/jobs/recent?limit=${encodeURIComponent(String(limit))}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch recent jobs: ${response.status}`);
+  }
+  return response.json() as Promise<RecentJobsPayload>;
 };
 
 

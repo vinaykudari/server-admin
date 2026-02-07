@@ -18,9 +18,40 @@ export type ActiveJob = {
   cmd?: string;
 };
 
+export type RecentJob = {
+  messageId: string;
+  startedAt?: string;
+  endedAt?: string;
+  exitCode?: number;
+  durationSec?: number;
+  actor?: string;
+  source?: string;
+  runLog?: string;
+  status: "running" | "ok" | "error" | "unknown";
+};
+
 function parseMessageId(cmd: string): string | null {
   const match = cmd.match(/\[message_id:\s*(\d+)\]/);
   return match?.[1] ?? null;
+}
+
+function parseMessageIdFromEvent(e: ActionEvent): string | null {
+  const direct = (e as { message_id?: unknown }).message_id;
+  if (typeof direct === "string" && direct) return direct;
+
+  const args = (e as { args?: unknown }).args;
+  if (Array.isArray(args)) {
+    const joined = args.map((x) => String(x)).join(" ");
+    const m = joined.match(/\[message_id:\s*(\d+)\]/);
+    if (m?.[1]) return m[1];
+  }
+
+  if (typeof args === "string") {
+    const m = args.match(/\[message_id:\s*(\d+)\]/);
+    if (m?.[1]) return m[1];
+  }
+
+  return null;
 }
 
 function pickPrimaryProcess(procs: ActiveProcess[]): ActiveProcess {
@@ -82,6 +113,76 @@ export async function listActiveJobs(): Promise<{ jobs: ActiveJob[]; warning?: s
   });
 
   return { jobs };
+}
+
+export async function listRecentJobs(limitJobs = 50): Promise<RecentJob[]> {
+  const safeLimit = Number.isFinite(limitJobs) ? Math.max(1, Math.min(200, limitJobs)) : 50;
+
+  // Get a larger action tail so we can build "recent" even if some jobs span many lines.
+  const events = await readRecentActions(2000);
+
+  const active = await listActiveCodexProcesses();
+  const activeMsgIds = new Set<string>();
+  if (active.ok) {
+    for (const p of active.processes) {
+      const id = parseMessageId(p.cmd);
+      if (id) activeMsgIds.add(id);
+    }
+  }
+
+  const map = new Map<string, RecentJob>();
+
+  for (const e of events) {
+    const messageId = parseMessageIdFromEvent(e);
+    if (!messageId) continue;
+
+    const job = map.get(messageId) ?? {
+      messageId,
+      status: "unknown" as const,
+    };
+
+    if (e.event === "start") {
+      job.startedAt = e.ts ?? job.startedAt;
+      job.actor = e.actor ? String(e.actor) : job.actor;
+      job.source = e.source ? String(e.source) : job.source;
+      const runLog = (e as { run_log?: unknown }).run_log;
+      if (typeof runLog === "string" && runLog) job.runLog = runLog;
+    }
+
+    if (e.event === "end") {
+      job.endedAt = e.ts ?? job.endedAt;
+      if (typeof e.exit_code === "number") job.exitCode = e.exit_code;
+      if (typeof e.duration_sec === "number") job.durationSec = e.duration_sec;
+    }
+
+    map.set(messageId, job);
+  }
+
+  const jobs = Array.from(map.values());
+
+  for (const j of jobs) {
+    if (activeMsgIds.has(j.messageId)) {
+      j.status = "running";
+      continue;
+    }
+
+    if (typeof j.exitCode === "number") {
+      j.status = j.exitCode === 0 ? "ok" : "error";
+      continue;
+    }
+
+    // If we saw a start but no end and its not active, its likely "unknown" (lost end event / older log).
+    j.status = j.startedAt ? "unknown" : "unknown";
+  }
+
+  jobs.sort((a, b) => {
+    if (a.startedAt && b.startedAt) return b.startedAt.localeCompare(a.startedAt);
+    if (a.startedAt) return -1;
+    if (b.startedAt) return 1;
+    return Number(b.messageId) - Number(a.messageId);
+  });
+
+  return jobs.slice(0, safeLimit);
 }
 
 export async function resolveGatewayLogPath(): Promise<string> {
@@ -154,7 +255,7 @@ export async function resolveJobOutputPath(messageId: string): Promise<string> {
     throw new Error(`No Codex output log found for message_id ${messageId}.`);
   }
 
-  // Names include a UTC timestamp; lexicographic sort yields chronological order.
+  // Names include a timestamp; lexicographic sort yields chronological order.
   candidates.sort().reverse();
   return path.join(codexLogsDir, candidates[0]!);
 }
@@ -164,11 +265,11 @@ export async function readJobOutputRecent(
   tailLines: number,
 ): Promise<{ path: string; lines: string[] }> {
   const filePath = await resolveJobOutputPath(messageId);
-  const safe = Number.isFinite(tailLines) ? Math.max(50, Math.min(2000, tailLines)) : 300;
+  const safe = Number.isFinite(tailLines) ? Math.max(50, Math.min(20000, tailLines)) : 300;
   const { stdout } = await execFileAsync(
     "tail",
     ["-n", String(safe), filePath],
-    { timeout: 5000, maxBuffer: 8 * 1024 * 1024 },
+    { timeout: 5000, maxBuffer: 32 * 1024 * 1024 },
   );
 
   const lines = stdout

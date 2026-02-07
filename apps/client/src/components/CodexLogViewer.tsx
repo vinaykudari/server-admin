@@ -39,6 +39,11 @@ type CodexRawItem = {
 
 type TimelineItem = CodexCommandItem | CodexTextItem | CodexFileChangeItem | CodexRawItem;
 
+type TurnState = {
+  status: "running" | "completed" | "unknown";
+  outputTokens?: number;
+};
+
 const safeParseJson = (line: string): unknown | null => {
   try {
     return JSON.parse(line);
@@ -47,10 +52,12 @@ const safeParseJson = (line: string): unknown | null => {
   }
 };
 
-function buildTimeline(lines: string[]): TimelineItem[] {
+function buildTimeline(lines: string[]): { timeline: TimelineItem[]; turn: TurnState } {
   const itemsById = new Map<string, TimelineItem>();
   const order: string[] = [];
   let rawSeq = 0;
+
+  const turn: TurnState = { status: "unknown" };
 
   const upsert = (item: TimelineItem) => {
     if (!itemsById.has(item.id)) {
@@ -69,6 +76,20 @@ function buildTimeline(lines: string[]): TimelineItem[] {
 
     const obj = parsed as Record<string, unknown>;
     const type = typeof obj.type === "string" ? obj.type : "";
+
+    if (type === "turn.started") {
+      turn.status = "running";
+      continue;
+    }
+
+    if (type === "turn.completed") {
+      turn.status = "completed";
+      const usage = obj.usage && typeof obj.usage === "object" ? (obj.usage as Record<string, unknown>) : null;
+      const out = usage && typeof usage.output_tokens === "number" ? usage.output_tokens : undefined;
+      if (typeof out === "number") turn.outputTokens = out;
+      continue;
+    }
+
     if (type !== "item.started" && type !== "item.completed") {
       continue;
     }
@@ -97,77 +118,128 @@ function buildTimeline(lines: string[]): TimelineItem[] {
     }
 
     if (itemType === "file_change") {
-      const changesRaw = Array.isArray(item.changes) ? item.changes : [];
-      const changes = changesRaw
-        .map((c) => {
-          if (!c || typeof c !== "object") return null;
-          const cc = c as Record<string, unknown>;
-          const p = typeof cc.path === "string" ? cc.path : "";
-          if (!p) return null;
-          const k = typeof cc.kind === "string" ? cc.kind : undefined;
-          return { path: p, kind: k };
-        })
-        .filter((v): v is { path: string; kind: string | undefined } => v !== null);
-
       const status = typeof item.status === "string" ? item.status : undefined;
+      const rawChanges = Array.isArray(item.changes) ? item.changes : [];
+      const changes = rawChanges
+        .map((c) => (c && typeof c === "object" ? (c as Record<string, unknown>) : null))
+        .filter(Boolean)
+        .map((c) => ({
+          path: typeof c?.path === "string" ? (c.path as string) : "(unknown)",
+          kind: typeof c?.kind === "string" ? (c.kind as string) : undefined,
+        }));
+
       upsert({ kind: "file_change", id, status, changes });
       continue;
     }
 
-    if (itemType === "command_execution") {
-      const prev = itemsById.get(id);
-      const prevCmd = prev && prev.kind === "command" ? prev : null;
-      const command = typeof item.command === "string" ? item.command : prevCmd?.command;
-      const output = typeof item.aggregated_output === "string" ? item.aggregated_output : prevCmd?.output;
-      const status = typeof item.status === "string" ? item.status : prevCmd?.status;
-      const exitCode = typeof item.exit_code === "number" ? item.exit_code : prevCmd?.exitCode;
-      upsert({ kind: "command", id, command, output, status, exitCode });
-    }
+    // command_execution
+    const command = typeof item.command === "string" ? item.command : undefined;
+    const output = typeof item.aggregated_output === "string" ? item.aggregated_output : undefined;
+    const exitCode = typeof item.exit_code === "number" ? item.exit_code : null;
+    const status = typeof item.status === "string" ? item.status : undefined;
+
+    upsert({ kind: "command", id, command, output, exitCode, status });
   }
 
-  return order.map((id) => itemsById.get(id)!).filter(Boolean);
+  const timeline = order
+    .map((id) => itemsById.get(id))
+    .filter((x): x is TimelineItem => Boolean(x));
+
+  return { timeline, turn };
 }
 
-function countLines(text: string): number {
+const countLines = (text: string): number => {
   if (!text) return 0;
   return text.split("\n").length;
-}
+};
 
-function trimCommand(cmd?: string): string {
+const trimCommand = (cmd: string): string => {
   if (!cmd) return "";
-  // Commands are often long; keep them readable without losing the important prefix.
-  return cmd.length > 240 ? `${cmd.slice(0, 240)}...` : cmd;
+  return cmd.length > 360 ? `${cmd.slice(0, 360)}...` : cmd;
+};
+
+function statusLabel(turn: TurnState, items: TimelineItem[]): { label: string; tone: "ok" | "err" | "muted" } {
+  const cmds = items.filter((i) => i.kind === "command") as CodexCommandItem[];
+  const running = cmds.filter((c) => !c.exitCode && c.status && c.status !== "completed");
+  const lastNonZero = [...cmds].reverse().find((c) => typeof c.exitCode === "number" && c.exitCode !== 0);
+
+  if (running.length > 0) return { label: "running", tone: "muted" };
+  if (turn.status === "completed") {
+    if (lastNonZero) return { label: "completed (errors)", tone: "err" };
+    return { label: "completed", tone: "ok" };
+  }
+  if (lastNonZero) return { label: "stopped (errors)", tone: "err" };
+  return { label: "idle", tone: "muted" };
 }
 
 export function CodexLogViewer({ lines }: Props) {
   const [showReasoning, setShowReasoning] = useState(false);
 
-  const timeline = useMemo(() => buildTimeline(lines.slice(-1200)), [lines]);
+  const { timeline, turn } = useMemo(() => buildTimeline(lines), [lines]);
 
   const filtered = useMemo(() => {
     if (showReasoning) return timeline;
     return timeline.filter((i) => !(i.kind === "text" && i.role === "reasoning"));
   }, [timeline, showReasoning]);
 
-  if (lines.length === 0) {
-    return <div className="state">No log lines yet.</div>;
-  }
+  const summary = useMemo(() => {
+    const cmds = filtered.filter((i) => i.kind === "command") as CodexCommandItem[];
+    const inProgress = cmds.filter((c) => (c.status && c.status !== "completed") || c.exitCode === null);
+    const current = [...inProgress].reverse().find((c) => c.command) ?? null;
+    const lastExit = [...cmds].reverse().find((c) => typeof c.exitCode === "number") ?? null;
+    const lastNonZero = [...cmds].reverse().find((c) => typeof c.exitCode === "number" && c.exitCode !== 0) ?? null;
+
+    return { inProgressCount: inProgress.length, current, lastExit, lastNonZero };
+  }, [filtered]);
+
+  const st = statusLabel(turn, filtered);
 
   return (
     <div className="codexlog">
-      <div className="codexlog__toolbar">
-        <button
-          className={showReasoning ? "codexlog__toggle codexlog__toggle--on" : "codexlog__toggle"}
-          onClick={() => setShowReasoning((v) => !v)}
-          type="button"
-          title="Show/hide model reasoning blocks"
-        >
-          {showReasoning ? "Reasoning: on" : "Reasoning: off"}
-        </button>
-        <span className="codexlog__hint">Parsed from Codex JSONL.</span>
+      <div className="codexlog__top">
+        <div className="codexlog__controls">
+          <button
+            type="button"
+            className="codexlog__toggle"
+            onClick={() => setShowReasoning((v) => !v)}
+          >
+            Reasoning: {showReasoning ? "on" : "off"}
+          </button>
+        </div>
+        <div className="codexlog__summary">
+          <span
+            className={
+              st.tone === "ok"
+                ? "codexlog__pill codexlog__pill--ok"
+                : st.tone === "err"
+                  ? "codexlog__pill codexlog__pill--err"
+                  : "codexlog__pill"
+            }
+          >
+            {st.label}
+          </span>
+          {summary.inProgressCount > 0 ? (
+            <span className="codexlog__pill">in-progress: {summary.inProgressCount}</span>
+          ) : null}
+          {turn.outputTokens ? <span className="codexlog__pill">out: {turn.outputTokens.toLocaleString()} tok</span> : null}
+        </div>
       </div>
 
-      <div className="codexlog__stream" role="log" aria-label="Codex job output">
+      {summary.current?.command ? (
+        <div className="codexlog__current">
+          <div className="codexlog__currentTitle">Current step</div>
+          <pre className="codexlog__cmd">{trimCommand(summary.current.command)}</pre>
+        </div>
+      ) : null}
+
+      {summary.lastNonZero?.command ? (
+        <div className="codexlog__current codexlog__current--err">
+          <div className="codexlog__currentTitle">Latest error</div>
+          <pre className="codexlog__cmd">{trimCommand(summary.lastNonZero.command)}</pre>
+        </div>
+      ) : null}
+
+      <div className="codexlog__timeline">
         {filtered.map((entry) => {
           if (entry.kind === "raw") {
             return (
@@ -233,9 +305,7 @@ export function CodexLogViewer({ lines }: Props) {
               <div className="codexlog__meta">
                 <span className="codexlog__badge">Command</span>
                 {isDone ? (
-                  <span className={
-                    ok ? "codexlog__badge codexlog__badge--ok" : "codexlog__badge codexlog__badge--err"
-                  }>
+                  <span className={ok ? "codexlog__badge codexlog__badge--ok" : "codexlog__badge codexlog__badge--err"}>
                     exit {exit}
                   </span>
                 ) : (

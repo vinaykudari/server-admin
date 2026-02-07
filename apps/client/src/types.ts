@@ -36,6 +36,18 @@ export type ActiveJob = {
   cmd?: string;
 };
 
+export type RecentJob = {
+  messageId: string;
+  startedAt?: string;
+  endedAt?: string;
+  exitCode?: number;
+  durationSec?: number;
+  actor?: string;
+  source?: string;
+  runLog?: string;
+  status: "running" | "ok" | "error" | "unknown";
+};
+
 export type ActionsRecentPayload = {
   events: ActionEvent[];
 };
@@ -50,11 +62,14 @@ export type ActiveJobsPayload = {
   warning?: string;
 };
 
+export type RecentJobsPayload = {
+  jobs: RecentJob[];
+};
+
 export type GatewayLogRecentPayload = {
   lines: string[];
   warning?: string;
 };
-
 
 export type JobOutputRecentPayload = {
   path: string;

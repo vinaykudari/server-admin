@@ -1,0 +1,67 @@
+.recentjobs {
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(2, 7, 14, 0.5);
+}
+
+.recentjobs__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.recentjobs__table th,
+.recentjobs__table td {
+  text-align: left;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(85, 120, 160, 0.18);
+  vertical-align: top;
+}
+
+.recentjobs__table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+
+.recentjobs__row {
+  cursor: pointer;
+}
+
+.recentjobs__row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.recentjobs__mono {
+  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+  white-space: nowrap;
+}
+
+.recentjobs__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(85, 120, 160, 0.35);
+  color: rgba(230, 242, 255, 0.9);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.recentjobs__status--ok {
+  border-color: rgba(57, 255, 164, 0.55);
+  color: rgba(57, 255, 164, 0.95);
+}
+
+.recentjobs__status--error {
+  border-color: rgba(255, 110, 110, 0.55);
+  color: rgb(255, 161, 161);
+}
+
+.recentjobs__status--running {
+  border-color: rgba(0, 170, 255, 0.55);
+  color: rgba(0, 170, 255, 0.95);
+}

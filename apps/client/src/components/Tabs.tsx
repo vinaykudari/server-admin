@@ -1,6 +1,6 @@
 import "./Tabs.css";
 
-type TabId = "overview" | "live";
+type TabId = "overview" | "jobs" | "live";
 
 type Tab = {
   id: TabId;
@@ -14,6 +14,7 @@ type TabsProps = {
 
 const tabs: Tab[] = [
   { id: "overview", label: "Overview" },
+  { id: "jobs", label: "Jobs" },
   { id: "live", label: "Live Sessions" },
 ];
 

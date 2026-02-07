@@ -9,14 +9,16 @@ import { JobsTable } from "./components/JobsTable";
 import { ActionsFeed } from "./components/ActionsFeed";
 import { LogLines } from "./components/LogLines";
 import { CodexLogViewer } from "./components/CodexLogViewer";
+import { JobsPage } from "./components/JobsPage";
 import { useLogs } from "./hooks/useLogs";
 import { useActiveJobs } from "./hooks/useActiveJobs";
 import { useActionsStream } from "./hooks/useActionsStream";
 import { useGatewayLog } from "./hooks/useGatewayLog";
 import { useJobOutput } from "./hooks/useJobOutput";
+import { useRecentJobs } from "./hooks/useRecentJobs";
 import type { LogDocument } from "./types";
 
-type TabId = "overview" | "live";
+type TabId = "overview" | "jobs" | "live";
 
 const countTasks = (doc?: LogDocument) => {
   if (!doc) return { open: 0, done: 0 };
@@ -40,9 +42,17 @@ function App() {
   const tasksStats = countTasks(data?.tasks);
 
   const { jobs, warning, error: jobsError } = useActiveJobs(4000);
+  const recent = useRecentJobs(6000, 80);
+
   const { events, connected, error: actionsError, paused, setPaused } = useActionsStream();
-  const { connected: gwConnected, lines: gwLines, error: gwError, paused: gwPaused, setPaused: setGwPaused } =
-    useGatewayLog();
+  const {
+    connected: gwConnected,
+    lines: gwLines,
+    error: gwError,
+    paused: gwPaused,
+    setPaused: setGwPaused,
+  } = useGatewayLog();
+
   const {
     connected: jobConnected,
     path: jobPath,
@@ -58,6 +68,11 @@ function App() {
     return new Date(data.runbook.updatedAt).toLocaleString();
   }, [data]);
 
+  const openJobInLive = (messageId: string) => {
+    setSelectedJob(messageId);
+    setTab("live");
+  };
+
   return (
     <div className="app">
       <div className="app__glow" />
@@ -68,10 +83,13 @@ function App() {
           <p className="app__subtitle">Live operational memory from this VM.</p>
         </div>
         <div className="app__headerRight">
-          <Tabs active={tab} onChange={(id) => {
-            setTab(id);
-            if (id !== "live") setSelectedJob(null);
-          }} />
+          <Tabs
+            active={tab}
+            onChange={(id) => {
+              setTab(id);
+              if (id !== "live") setSelectedJob(null);
+            }}
+          />
           <button className="button" onClick={() => void refresh()}>
             Refresh
           </button>
@@ -98,16 +116,19 @@ function App() {
         </div>
       )}
 
+      {tab === "jobs" && (
+        <JobsPage jobs={recent.jobs} loading={recent.loading} error={recent.error} onOpenJob={openJobInLive} />
+      )}
+
       {tab === "live" && (
         <div className="grid grid--single">
-          <Panel
-            title="Active Jobs"
-            subtitle="Grouped by Telegram message_id"
-            actions={<span className="pill">OPENCLAW</span>}
-          >
+          <Panel title="Active Jobs" subtitle="Running Codex jobs" actions={<span className="pill">OPENCLAW</span>}>
             {warning && <div className="state">Warning: {warning}</div>}
             {jobsError && <div className="state state--error">{jobsError}</div>}
             <JobsTable jobs={jobs} selected={selectedJob} onSelect={(id) => setSelectedJob(id)} />
+            <div className="state">
+              Want a completed/failed job? Use the Jobs tab, then click a row to open it here.
+            </div>
           </Panel>
 
           <Panel
@@ -151,7 +172,7 @@ function App() {
           </Panel>
 
           <Panel
-            title={selectedJob ? `Gateway Log (selected ${selectedJob})` : "Gateway Log"}
+            title="Gateway Log"
             subtitle={gwConnected ? "Live" : "Reconnecting"}
             actions={
               <button className="button button--ghost" onClick={() => setGwPaused(!gwPaused)}>

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 
 import {
   listActiveJobs,
+  listRecentJobs,
   readGatewayLogRecent,
   readJobActions,
   readJobOutputRecent,
@@ -16,6 +17,13 @@ const router = Router();
 router.get("/jobs/active", async (_req: Request, res: Response) => {
   const { jobs, warning } = await listActiveJobs();
   res.json({ jobs, warning });
+});
+
+router.get("/jobs/recent", async (req: Request, res: Response) => {
+  const limit = Number(req.query.limit ?? 50);
+  const safe = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 50;
+  const jobs = await listRecentJobs(safe);
+  res.json({ jobs });
 });
 
 router.get("/jobs/:messageId/actions", async (req: Request, res: Response) => {
