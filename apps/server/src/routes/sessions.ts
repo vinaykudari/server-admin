@@ -15,23 +15,23 @@ router.get("/actions/recent", async (req: Request, res: Response) => {
 });
 
 router.get("/sessions/active", async (_req: Request, res: Response) => {
-  const processes = await listActiveCodexProcesses();
-  res.json({ processes });
+  const result = await listActiveCodexProcesses();
+  if (result.ok) {
+    res.json({ processes: result.processes });
+    return;
+  }
+  res.status(200).json({ processes: result.processes, error: result.error });
 });
 
 router.get("/stream/actions", (req: Request, res: Response) => {
-  // SSE endpoint used by the dashboard to watch /root/.openclaw/workspace/logs/actions.ndjson.
-  // Send an immediate "ready" message so clients know the connection is established.
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
 
-  // Flush headers immediately (Node may otherwise wait until first body write).
   res.write(`event: ready\ndata: ${Date.now()}\n\n`);
 
-  // Keep connection alive through proxies.
   const keepAlive = setInterval(() => {
     res.write(`event: ping\ndata: ${Date.now()}\n\n`);
   }, 15000);
@@ -42,7 +42,6 @@ router.get("/stream/actions", (req: Request, res: Response) => {
 
   const onChunk = (chunk: Buffer) => {
     const text = chunk.toString("utf8");
-    // `tail -F` can chunk multiple lines; forward as raw ndjson lines.
     for (const line of text.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
