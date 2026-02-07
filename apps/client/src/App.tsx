@@ -5,11 +5,13 @@ import { useMemo, useState } from "react";
 import { Panel } from "./components/Panel";
 import { LogViewer } from "./components/LogViewer";
 import { Tabs } from "./components/Tabs";
-import { ProcessesTable } from "./components/ProcessesTable";
+import { JobsTable } from "./components/JobsTable";
 import { ActionsFeed } from "./components/ActionsFeed";
+import { LogLines } from "./components/LogLines";
 import { useLogs } from "./hooks/useLogs";
-import { useActiveProcesses } from "./hooks/useActiveProcesses";
+import { useActiveJobs } from "./hooks/useActiveJobs";
 import { useActionsStream } from "./hooks/useActionsStream";
+import { useGatewayLog } from "./hooks/useGatewayLog";
 import type { LogDocument } from "./types";
 
 type TabId = "overview" | "live";
@@ -30,12 +32,15 @@ const Stat = ({ label, value }: { label: string; value: string }) => (
 
 function App() {
   const [tab, setTab] = useState<TabId>("overview");
+  const [selectedJob, setSelectedJob] = useState<string | null>(null);
 
   const { data, loading, error, refresh } = useLogs();
   const tasksStats = countTasks(data?.tasks);
 
-  const { processes, error: procError } = useActiveProcesses(5000);
-  const { events, connected, error: streamError, paused, setPaused } = useActionsStream();
+  const { jobs, warning, error: jobsError } = useActiveJobs(4000);
+  const { events, connected, error: actionsError, paused, setPaused } = useActionsStream();
+  const { connected: gwConnected, lines: gwLines, error: gwError, paused: gwPaused, setPaused: setGwPaused } =
+    useGatewayLog();
 
   const lastUpdate = useMemo(() => {
     if (!data) return "-";
@@ -52,7 +57,10 @@ function App() {
           <p className="app__subtitle">Live operational memory from this VM.</p>
         </div>
         <div className="app__headerRight">
-          <Tabs active={tab} onChange={setTab} />
+          <Tabs active={tab} onChange={(id) => {
+            setTab(id);
+            if (id !== "live") setSelectedJob(null);
+          }} />
           <button className="button" onClick={() => void refresh()}>
             Refresh
           </button>
@@ -82,12 +90,13 @@ function App() {
       {tab === "live" && (
         <div className="grid grid--single">
           <Panel
-            title="Active Codex Jobs"
-            subtitle="OpenClaw gateway container"
-            actions={<span className="pill">docker ps</span>}
+            title="Active Jobs"
+            subtitle="Grouped by Telegram message_id"
+            actions={<span className="pill">OPENCLAW</span>}
           >
-            {procError && <div className="state state--error">{procError}</div>}
-            <ProcessesTable processes={processes} />
+            {warning && <div className="state">Warning: {warning}</div>}
+            {jobsError && <div className="state state--error">{jobsError}</div>}
+            <JobsTable jobs={jobs} selected={selectedJob} onSelect={(id) => setSelectedJob(id)} />
           </Panel>
 
           <Panel
@@ -99,8 +108,21 @@ function App() {
               </button>
             }
           >
-            {streamError && <div className="state state--error">{streamError}</div>}
+            {actionsError && <div className="state state--error">{actionsError}</div>}
             <ActionsFeed events={events} />
+          </Panel>
+
+          <Panel
+            title={selectedJob ? `Gateway Log (selected ${selectedJob})` : "Gateway Log"}
+            subtitle={gwConnected ? "Live" : "Reconnecting"}
+            actions={
+              <button className="button button--ghost" onClick={() => setGwPaused(!gwPaused)}>
+                {gwPaused ? "Resume" : "Pause"}
+              </button>
+            }
+          >
+            {gwError && <div className="state state--error">{gwError}</div>}
+            <LogLines lines={gwLines} />
           </Panel>
         </div>
       )}

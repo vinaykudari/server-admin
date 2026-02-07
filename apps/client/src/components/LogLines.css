@@ -1,0 +1,13 @@
+.loglines {
+  background: rgba(2, 7, 14, 0.7);
+  border: 1px solid rgba(57, 255, 164, 0.2);
+  border-radius: 12px;
+  padding: 1rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+  color: var(--text);
+  max-height: 60vh;
+  overflow: auto;
+}

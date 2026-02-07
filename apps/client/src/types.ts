@@ -28,10 +28,28 @@ export type ActiveProcess = {
   cmd: string;
 };
 
+export type ActiveJob = {
+  messageId: string;
+  startedAt?: string;
+  pids: number[];
+  etime?: string;
+  cmd?: string;
+};
+
 export type ActionsRecentPayload = {
   events: ActionEvent[];
 };
 
 export type ActiveSessionsPayload = {
   processes: ActiveProcess[];
+  error?: string;
+};
+
+export type ActiveJobsPayload = {
+  jobs: ActiveJob[];
+  warning?: string;
+};
+
+export type GatewayLogRecentPayload = {
+  lines: string[];
 };
