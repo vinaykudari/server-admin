@@ -7,7 +7,6 @@ import logsRouter from "./routes/logs.js";
 import sessionsRouter from "./routes/sessions.js";
 import jobsRouter from "./routes/jobs.js";
 import usageRouter from "./routes/usage.js";
-import codexRouter from "./routes/codex.js";
 import { clientDistPath } from "./utils/paths.js";
 
 const app = express();
@@ -21,7 +20,10 @@ app.use("/api", logsRouter);
 app.use("/api", sessionsRouter);
 app.use("/api", jobsRouter);
 app.use("/api", usageRouter);
-app.use("/api", codexRouter);
+
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "API route not found" });
+});
 
 app.use(express.static(clientDistPath));
 

@@ -11,7 +11,6 @@ import { LogLines } from "./components/LogLines";
 import { CodexLogViewer } from "./components/CodexLogViewer";
 import { JobsPage } from "./components/JobsPage";
 import { CodexUsagePanel } from "./components/CodexUsagePanel";
-import { CodexStatusPanel } from "./components/CodexStatusPanel";
 import { useLogs } from "./hooks/useLogs";
 import { useActiveJobs } from "./hooks/useActiveJobs";
 import { useActionsStream } from "./hooks/useActionsStream";
@@ -116,7 +115,6 @@ function App() {
             <LogViewer doc={data.tasks} />
           </Panel>
           <CodexUsagePanel />
-          <CodexStatusPanel />
         </div>
       )}
 

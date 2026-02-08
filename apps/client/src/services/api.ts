@@ -7,7 +7,6 @@ import type {
   JobOutputRecentPayload,
   LogsPayload,
   CodexUsagePayload,
-  CodexStatusPayload,
 } from "../types";
 
 export const fetchLogs = async (): Promise<LogsPayload> => {
@@ -81,12 +80,3 @@ export const fetchCodexUsage = async (): Promise<CodexUsagePayload> => {
 };
 
 
-export const fetchCodexStatus = async (): Promise<CodexStatusPayload> => {
-  const response = await fetch("/api/codex/status");
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({} as unknown));
-    const msg = (body as { error?: string }).error;
-    throw new Error(msg ? `Failed to fetch codex status: ${msg}` : `Failed to fetch codex status: ${response.status}`);
-  }
-  return response.json() as Promise<CodexStatusPayload>;
-};

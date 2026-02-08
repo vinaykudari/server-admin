@@ -96,10 +96,3 @@ export type CodexUsagePayload = {
 };
 
 
-export type CodexStatusPayload = {
-  model?: string;
-  account?: string;
-  fiveHour?: { leftPercent: number; resets: string };
-  weekly?: { leftPercent: number; resets: string };
-  error?: string;
-};
