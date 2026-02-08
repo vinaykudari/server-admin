@@ -175,11 +175,28 @@ export async function listRecentJobs(limitJobs = 50): Promise<RecentJob[]> {
     j.status = j.startedAt ? "unknown" : "unknown";
   }
 
+  const toMs = (ts?: string): number | null => {
+    if (!ts) return null;
+    const ms = Date.parse(ts);
+    return Number.isFinite(ms) ? ms : null;
+  };
+
   jobs.sort((a, b) => {
-    if (a.startedAt && b.startedAt) return b.startedAt.localeCompare(a.startedAt);
-    if (a.startedAt) return -1;
-    if (b.startedAt) return 1;
-    return Number(b.messageId) - Number(a.messageId);
+    // Sort by actual timestamp (handles mixed Z and offsets).
+    const am = toMs(a.startedAt);
+    const bm = toMs(b.startedAt);
+    if (am != null && bm != null) {
+      if (bm !== am) return bm - am;
+    } else if (am != null) {
+      return -1;
+    } else if (bm != null) {
+      return 1;
+    }
+
+    const ai = Number(a.messageId);
+    const bi = Number(b.messageId);
+    if (Number.isFinite(ai) && Number.isFinite(bi)) return bi - ai;
+    return String(b.messageId).localeCompare(String(a.messageId));
   });
 
   return jobs.slice(0, safeLimit);

@@ -75,3 +75,31 @@ export type JobOutputRecentPayload = {
   path: string;
   lines: string[];
 };
+
+
+export type CodexUsageWindow = {
+  runs: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  since: string;
+  until: string;
+};
+
+export type CodexUsagePayload = {
+  last5h: CodexUsageWindow;
+  last7d: CodexUsageWindow;
+  scannedFiles: number;
+  newestLogAt?: string;
+  warning?: string;
+};
+
+
+export type CodexStatusPayload = {
+  model?: string;
+  account?: string;
+  fiveHour?: { leftPercent: number; resets: string };
+  weekly?: { leftPercent: number; resets: string };
+  error?: string;
+};

@@ -6,6 +6,8 @@ import type {
   GatewayLogRecentPayload,
   JobOutputRecentPayload,
   LogsPayload,
+  CodexUsagePayload,
+  CodexStatusPayload,
 } from "../types";
 
 export const fetchLogs = async (): Promise<LogsPayload> => {
@@ -67,4 +69,24 @@ export const fetchJobOutputRecent = async (messageId: string, tail = 200): Promi
     throw new Error(msg ? `Job output unavailable: ${msg}` : `Failed to fetch job output: ${response.status}`);
   }
   return response.json() as Promise<JobOutputRecentPayload>;
+};
+
+
+export const fetchCodexUsage = async (): Promise<CodexUsagePayload> => {
+  const response = await fetch("/api/usage/codex");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch codex usage: ${response.status}`);
+  }
+  return response.json() as Promise<CodexUsagePayload>;
+};
+
+
+export const fetchCodexStatus = async (): Promise<CodexStatusPayload> => {
+  const response = await fetch("/api/codex/status");
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as unknown));
+    const msg = (body as { error?: string }).error;
+    throw new Error(msg ? `Failed to fetch codex status: ${msg}` : `Failed to fetch codex status: ${response.status}`);
+  }
+  return response.json() as Promise<CodexStatusPayload>;
 };
