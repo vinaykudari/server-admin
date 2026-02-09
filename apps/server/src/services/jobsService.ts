@@ -236,8 +236,65 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-async function resolveLatestIfSafe(messageId: string): Promise<string | null> {
-  const latest = path.join(codexLogsDir, `msg${messageId}.latest.jsonl`);
+async function safeReadlinkCwd(pid: number): Promise<string | null> {
+  // Linux-only; on other platforms /proc will not exist.
+  if (process.platform !== "linux") return null;
+  try {
+    const link = `/proc/${pid}/cwd`;
+    const cwd = await fs.readlink(link);
+    return path.resolve(cwd);
+  } catch {
+    return null;
+  }
+}
+
+async function findActiveJobCwd(messageId: string): Promise<string | null> {
+  const active = await listActiveCodexProcesses();
+  if (!active.ok) return null;
+
+  const matches = active.processes.filter((p) => parseMessageId(p.cmd) === messageId);
+  if (matches.length === 0) return null;
+
+  const primary = pickPrimaryProcess(matches);
+  return await safeReadlinkCwd(primary.pid);
+}
+
+async function listCandidateCodexLogDirs(messageId: string): Promise<string[]> {
+  const dirs: string[] = [];
+
+  // 1) If this message is currently running, prefer the actual job cwd.
+  const cwd = await findActiveJobCwd(messageId);
+  if (cwd) dirs.push(path.join(cwd, "logs", "codex"));
+
+  // 2) Default workspace.
+  dirs.push(codexLogsDir);
+
+  // 3) Any other workspaces under the OpenClaw state dir (e.g. workspace-mom).
+  // This keeps the UI working if jobs are launched from a different workspace.
+  const base = "/home/openclaw/.openclaw";
+  try {
+    const entries = await fs.readdir(base, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      if (!ent.name.startsWith("workspace")) continue;
+      dirs.push(path.join(base, ent.name, "logs", "codex"));
+    }
+  } catch {
+    // Ignore; directory might not exist in dev/test environments.
+  }
+
+  // De-dupe while preserving order (highest priority first).
+  const seen = new Set<string>();
+  return dirs.filter((d) => {
+    const resolved = path.resolve(d);
+    if (seen.has(resolved)) return false;
+    seen.add(resolved);
+    return true;
+  });
+}
+
+async function resolveLatestIfSafeInDir(logsDir: string, messageId: string): Promise<string | null> {
+  const latest = path.join(logsDir, `msg${messageId}.latest.jsonl`);
 
   try {
     const st = await fs.lstat(latest);
@@ -246,9 +303,9 @@ async function resolveLatestIfSafe(messageId: string): Promise<string | null> {
     // If the "latest" pointer escapes the Codex logs directory, ignore it and fall back to timestamped files.
     if (st.isSymbolicLink()) {
       const real = await fs.realpath(latest);
-      const logsDir = path.resolve(codexLogsDir) + path.sep;
+      const logsRoot = path.resolve(logsDir) + path.sep;
       const resolved = path.resolve(real);
-      if (!resolved.startsWith(logsDir)) return null;
+      if (!resolved.startsWith(logsRoot)) return null;
     }
 
     return latest;
@@ -258,23 +315,30 @@ async function resolveLatestIfSafe(messageId: string): Promise<string | null> {
 }
 
 export async function resolveJobOutputPath(messageId: string): Promise<string> {
-  const latestOk = await resolveLatestIfSafe(messageId);
-  if (latestOk) return latestOk;
+  const dirs = await listCandidateCodexLogDirs(messageId);
 
-  if (!(await pathExists(codexLogsDir))) {
+  let anyCodexDirExists = false;
+  for (const dir of dirs) {
+    if (!(await pathExists(dir))) continue;
+    anyCodexDirExists = true;
+
+    const latestOk = await resolveLatestIfSafeInDir(dir, messageId);
+    if (latestOk) return latestOk;
+
+    const entries = await fs.readdir(dir);
+    const prefix = `msg${messageId}-`;
+    const candidates = entries.filter((n) => n.startsWith(prefix) && n.endsWith(".jsonl"));
+    if (candidates.length === 0) continue;
+
+    // Names include a timestamp; lexicographic sort yields chronological order.
+    candidates.sort().reverse();
+    return path.join(dir, candidates[0]!);
+  }
+
+  if (!anyCodexDirExists) {
     throw new Error("Codex output directory not found yet; no jobs have written output logs.");
   }
-
-  const entries = await fs.readdir(codexLogsDir);
-  const prefix = `msg${messageId}-`;
-  const candidates = entries.filter((n) => n.startsWith(prefix) && n.endsWith(".jsonl"));
-  if (candidates.length === 0) {
-    throw new Error(`No Codex output log found for message_id ${messageId}.`);
-  }
-
-  // Names include a timestamp; lexicographic sort yields chronological order.
-  candidates.sort().reverse();
-  return path.join(codexLogsDir, candidates[0]!);
+  throw new Error(`No Codex output log found for message_id ${messageId}.`);
 }
 
 export async function readJobOutputRecent(
