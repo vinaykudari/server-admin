@@ -1,28 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { fetchCodexUsage } from "../services/api";
-import type { CodexUsagePayload } from "../types";
+import { fetchCodexAccounts } from "../services/api";
+import type { CodexAccountsPayload } from "../types";
 
 type State = {
-  data: CodexUsagePayload | null;
+  accounts: CodexAccountsPayload | null;
   loading: boolean;
-  error: string | null;
-  refresh: () => Promise<void>;
+  statusError: string | null;
+  refresh: (opts?: { refreshStatus?: boolean }) => Promise<void>;
 };
 
 export function useCodexUsage(): State {
-  const [data, setData] = useState<CodexUsagePayload | null>(null);
+  const [accounts, setAccounts] = useState<CodexAccountsPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { refreshStatus?: boolean }) => {
     setLoading(true);
     try {
-      const res = await fetchCodexUsage();
-      setData(res);
-      setError(null);
+      const res = await fetchCodexAccounts(opts?.refreshStatus ?? false);
+      setAccounts(res);
+      setStatusError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setStatusError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -32,5 +32,5 @@ export function useCodexUsage(): State {
     void refresh();
   }, [refresh]);
 
-  return { data, loading, error, refresh };
+  return { accounts, loading, statusError, refresh };
 }
