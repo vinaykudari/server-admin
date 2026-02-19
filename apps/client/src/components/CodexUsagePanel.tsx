@@ -1,13 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useCodexUsage } from "../hooks/useCodexUsage";
 import { fetchGcpBilling } from "../services/api";
-import type {
-  CodexAccountStatusPayload,
-  CodexStatusLimit,
-  GcpBillingPayload,
-  GcpBillingServiceCost,
-} from "../types";
+import type { CodexAccountStatusPayload, CodexStatusLimit, GcpBillingPayload, GcpBillingServiceCost } from "../types";
 import { Panel } from "./Panel";
 import { RefreshIcon } from "./RefreshIcon";
 
@@ -72,69 +67,68 @@ const StatusOrb = ({ title, limit, className }: { title: string; limit: CodexSta
   );
 };
 
-type ViewMode = "codex1" | "codex2" | "gcp";
-
-function nextView(view: ViewMode): ViewMode {
-  if (view === "codex1") return "codex2";
-  if (view === "codex2") return "gcp";
-  return "codex1";
-}
-
-function titleForView(view: ViewMode) {
-  if (view === "codex1") return "Codex 1 Usage";
-  if (view === "codex2") return "Codex 2 Usage";
-  return "GCP Usage";
-}
-
-function findAccount(accounts: CodexAccountStatusPayload[] | undefined, id: "codex1" | "codex2") {
-  if (!accounts) return null;
-  return accounts.find((a) => a.id === id) ?? null;
-}
-
-function CodexAccountView({ account, fallbackId }: { account: CodexAccountStatusPayload | null; fallbackId: string }) {
-  const status = account?.status ?? null;
+function CodexAccountView({ account }: { account: CodexAccountStatusPayload }) {
+  const status = account.status;
 
   return (
     <div className="usage">
-      {!account && <div className="state">No account metadata found for `{fallbackId}`.</div>}
-      {account && !status && <div className="state">No status data available yet for {account.label}.</div>}
-      {account && (
-        <section className="usage__hero">
-          <div className="usage__heroBg" />
-          <div className="usage__meta">
-            <div className="usage__metaLabel">{account.label}</div>
-            <div className="usage__metaValue">{account.id}</div>
-            <div className="usage__metaSub">Auth: {account.hasAuth === null ? "Unknown" : account.hasAuth ? "Configured" : "Missing"}</div>
+      <section className="usage__hero">
+        <div className="usage__heroBg" />
+        <div className="usage__meta">
+          <div className="usage__metaLabel">{account.label}</div>
+          <div className="usage__metaValue">{account.id}</div>
+          <div className="usage__metaSub">
+            Auth: {account.hasAuth === null ? "Unknown" : account.hasAuth ? "Configured" : "Missing"}
           </div>
-          {status && (
+        </div>
+
+        {!status && <div className="state">No status data available yet for this account.</div>}
+
+        {status && (
+          <>
             <div className="usage__orbs">
               <StatusOrb title="5-hour Limit" limit={status.limits.fiveHour} className="statusOrb--five" />
               <StatusOrb title="Weekly Limit" limit={status.limits.weekly} className="statusOrb--week" />
             </div>
-          )}
-          <div className="gcpUsage__totals gcpUsage__totals--codex">
-            <div className="gcpUsage__tile">
-              <div className="gcpUsage__label">24h Requests</div>
-              <div className="gcpUsage__value">{account.usage24h.requests}</div>
+            <div className="gcpUsage__totals gcpUsage__totals--codex">
+              <div className="gcpUsage__tile">
+                <div className="gcpUsage__label">24h Requests</div>
+                <div className="gcpUsage__value">{account.usage24h.requests}</div>
+              </div>
+              <div className="gcpUsage__tile">
+                <div className="gcpUsage__label">24h Tokens</div>
+                <div className="gcpUsage__value">{account.usage24h.totalTokens.toLocaleString()}</div>
+              </div>
             </div>
-            <div className="gcpUsage__tile">
-              <div className="gcpUsage__label">24h Tokens</div>
-              <div className="gcpUsage__value">{account.usage24h.totalTokens.toLocaleString()}</div>
-            </div>
-          </div>
-        </section>
-      )}
+          </>
+        )}
+      </section>
     </div>
   );
 }
 
+type ViewItem = { kind: "account"; account: CodexAccountStatusPayload } | { kind: "gcp" };
+
 export function CodexUsagePanel() {
   const { accounts, loading, statusError, refresh } = useCodexUsage();
-  const [view, setView] = useState<ViewMode>("codex1");
+  const [viewIndex, setViewIndex] = useState(0);
   const [gcp, setGcp] = useState<GcpBillingPayload | null>(null);
   const [gcpLoading, setGcpLoading] = useState(false);
   const [gcpError, setGcpError] = useState<string | null>(null);
   const [showGcpDetails, setShowGcpDetails] = useState(false);
+
+  const views = useMemo<ViewItem[]>(() => {
+    const accountViews: ViewItem[] = (accounts?.accounts ?? []).map((account) => ({ kind: "account", account }));
+    return [...accountViews, { kind: "gcp" }];
+  }, [accounts]);
+
+  useEffect(() => {
+    if (viewIndex >= views.length) {
+      setViewIndex(0);
+    }
+  }, [viewIndex, views.length]);
+
+  const current = views[Math.max(0, Math.min(viewIndex, views.length - 1))] ?? { kind: "gcp" as const };
 
   const refreshGcp = async (force = false) => {
     setGcpLoading(true);
@@ -150,56 +144,61 @@ export function CodexUsagePanel() {
   };
 
   useEffect(() => {
-    if (view === "gcp" && !gcp && !gcpLoading) {
+    if (current.kind === "gcp" && !gcp && !gcpLoading) {
       void refreshGcp();
     }
-  }, [view, gcp, gcpLoading]);
+  }, [current.kind, gcp, gcpLoading]);
 
   const onRefresh = () => {
-    if (view === "gcp") {
+    if (current.kind === "gcp") {
       void refreshGcp(true);
       return;
     }
     void refresh({ refreshStatus: true });
   };
 
-  const codex1 = findAccount(accounts?.accounts, "codex1");
-  const codex2 = findAccount(accounts?.accounts, "codex2");
+  const next = () => {
+    setShowGcpDetails(false);
+    setViewIndex((idx) => {
+      if (views.length === 0) return 0;
+      return (idx + 1) % views.length;
+    });
+  };
+
+  const title =
+    current.kind === "account"
+      ? `${current.account.label} Usage`
+      : "GCP Usage";
 
   return (
     <Panel
-      title={titleForView(view)}
+      title={title}
       inlineHeader
       actions={
         <div className="usage__actions">
-          <button
-            className="button button--ghost usage__next"
-            onClick={() => {
-              setShowGcpDetails(false);
-              setView((curr) => nextView(curr));
-            }}
-          >
+          <button className="button button--ghost usage__next" onClick={next}>
             Next
           </button>
           <button
             className="button button--ghost button--icon button--iconOnly"
             onClick={onRefresh}
-            aria-label={view === "gcp" ? "Refresh GCP usage live" : "Refresh Codex usage live"}
-            title={view === "gcp" ? "Refresh GCP usage live" : "Refresh Codex usage live"}
+            aria-label={current.kind === "gcp" ? "Refresh GCP usage live" : "Refresh Codex usage live"}
+            title={current.kind === "gcp" ? "Refresh GCP usage live" : "Refresh Codex usage live"}
           >
             <RefreshIcon />
           </button>
         </div>
       }
     >
-      {view !== "gcp" && loading && <div className="state">Loading usage...</div>}
-      {view !== "gcp" && statusError && <div className="state state--error">Plan status unavailable: {statusError}</div>}
-      {view === "codex1" && !loading && !statusError && <CodexAccountView account={codex1} fallbackId="codex1" />}
-      {view === "codex2" && !loading && !statusError && <CodexAccountView account={codex2} fallbackId="codex2" />}
+      {current.kind === "account" && loading && <div className="state">Loading usage...</div>}
+      {current.kind === "account" && statusError && (
+        <div className="state state--error">Plan status unavailable: {statusError}</div>
+      )}
+      {current.kind === "account" && !loading && !statusError && <CodexAccountView account={current.account} />}
 
-      {view === "gcp" && gcpLoading && <div className="state">Loading GCP usage...</div>}
-      {view === "gcp" && gcpError && <div className="state state--error">GCP usage unavailable: {gcpError}</div>}
-      {view === "gcp" && !gcpLoading && gcp && (
+      {current.kind === "gcp" && gcpLoading && <div className="state">Loading GCP usage...</div>}
+      {current.kind === "gcp" && gcpError && <div className="state state--error">GCP usage unavailable: {gcpError}</div>}
+      {current.kind === "gcp" && !gcpLoading && gcp && (
         <div className="usage">
           <section className="usage__hero usage__hero--gcp">
             <div className="usage__heroBg usage__heroBg--gcp" />
@@ -236,7 +235,9 @@ export function CodexUsagePanel() {
           </section>
         </div>
       )}
-      {view === "gcp" && !gcpLoading && !gcp && !gcpError && <div className="state">No GCP usage data available yet.</div>}
+      {current.kind === "gcp" && !gcpLoading && !gcp && !gcpError && (
+        <div className="state">No GCP usage data available yet.</div>
+      )}
     </Panel>
   );
 }
