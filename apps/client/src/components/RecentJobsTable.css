@@ -7,6 +7,7 @@
 
 .recentjobs__table {
   width: 100%;
+  min-width: 820px;
   border-collapse: collapse;
 }
 
@@ -64,4 +65,16 @@
 .recentjobs__status--running {
   border-color: rgba(0, 170, 255, 0.55);
   color: rgba(0, 170, 255, 0.95);
+}
+
+@media (max-width: 720px) {
+  .recentjobs__table th,
+  .recentjobs__table td {
+    padding: 0.66rem 0.68rem;
+  }
+
+  .recentjobs__table th {
+    letter-spacing: 0.14em;
+    font-size: 0.68rem;
+  }
 }

@@ -5,10 +5,18 @@ import { fileURLToPath } from "node:url";
 // Keep env override for future flexibility, but default to the native state dir.
 export const workspaceRoot =
   process.env.WORKSPACE_ROOT ?? "/home/openclaw/.openclaw/workspace";
+export const openclawStateRoot =
+  process.env.OPENCLAW_STATE_ROOT ?? "/home/openclaw/.openclaw";
+export const agentsRoot = path.join(openclawStateRoot, "agents");
 
 export const runbookPath = path.join(workspaceRoot, "RUNBOOK.md");
 export const tasksPath = path.join(workspaceRoot, "TASKS.md");
 export const actionsLogPath = path.join(workspaceRoot, "logs", "actions.ndjson");
+export const managedEnvPath =
+  process.env.MANAGED_ENV_PATH ?? path.join(workspaceRoot, ".env.shared");
+export const credentialStorePath =
+  process.env.CREDENTIAL_STORE_PATH ??
+  path.join(workspaceRoot, "credentials", "store.json");
 
 export const codexLogsDir = path.join(workspaceRoot, "logs", "codex");
 

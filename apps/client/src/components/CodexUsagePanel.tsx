@@ -8,13 +8,29 @@ import { RefreshIcon } from "./RefreshIcon";
 
 import "./CodexUsagePanel.css";
 
+const USAGE_COPY = {
+  unknown: "Unknown",
+  codexUsageTitle: "Codex Usage",
+  primaryAccountLabel: "Primary",
+  accountIdPrefix: "Account ID:",
+  accountStatusUnavailable: "No status data available yet for this account.",
+  accountLoading: "Loading usage...",
+  accountStatusErrorPrefix: "Plan status unavailable:",
+  gcpLoading: "Loading GCP usage...",
+  gcpUnavailablePrefix: "GCP usage unavailable:",
+  gcpNoData: "No GCP usage data available yet.",
+  gcpNoServiceCosts: "No service costs yet.",
+  refreshCodex: "Refresh Codex usage live",
+  refreshGcp: "Refresh GCP usage live",
+} as const;
+
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 const pct = (n: number | null) => (typeof n === "number" && Number.isFinite(n) ? clamp(n, 0, 100) : null);
 
 const resetIn = (value: string | null | undefined) => {
-  if (!value) return "Unknown";
+  if (!value) return USAGE_COPY.unknown;
   const target = Date.parse(value);
-  if (!Number.isFinite(target)) return "Unknown";
+  if (!Number.isFinite(target)) return USAGE_COPY.unknown;
 
   const diffMs = target - Date.now();
   if (diffMs <= 0) return "now";
@@ -69,20 +85,25 @@ const StatusOrb = ({ title, limit, className }: { title: string; limit: CodexSta
 
 function CodexAccountView({ account }: { account: CodexAccountStatusPayload }) {
   const status = account.status;
+  const isPrimaryAccount = account.id.trim().toLowerCase() === "primary";
+  const showAccountId = !isPrimaryAccount && account.id.trim().toLowerCase() !== account.label.trim().toLowerCase();
+  const accountLabel = isPrimaryAccount ? USAGE_COPY.primaryAccountLabel : account.label;
 
   return (
     <div className="usage">
       <section className="usage__hero">
         <div className="usage__heroBg" />
         <div className="usage__meta">
-          <div className="usage__metaLabel">{account.label}</div>
-          <div className="usage__metaValue">{account.id}</div>
-          <div className="usage__metaSub">
-            Auth: {account.hasAuth === null ? "Unknown" : account.hasAuth ? "Configured" : "Missing"}
-          </div>
+          <div className="usage__metaLabel">{USAGE_COPY.codexUsageTitle}</div>
+          <div className="usage__metaValue">{accountLabel}</div>
+          {showAccountId && (
+            <div className="usage__metaSub">
+              {USAGE_COPY.accountIdPrefix} {account.id}
+            </div>
+          )}
         </div>
 
-        {!status && <div className="state">No status data available yet for this account.</div>}
+        {!status && <div className="state">{USAGE_COPY.accountStatusUnavailable}</div>}
 
         {status && (
           <>
@@ -165,10 +186,10 @@ export function CodexUsagePanel() {
     });
   };
 
-  const title =
-    current.kind === "account"
-      ? `${current.account.label} Usage`
-      : "GCP Usage";
+  const title = current.kind === "account" ? USAGE_COPY.codexUsageTitle : "GCP Usage";
+  const isGcpView = current.kind === "gcp";
+  const refreshUsageLabel = isGcpView ? USAGE_COPY.refreshGcp : USAGE_COPY.refreshCodex;
+  const gcpServices = gcp ? topServices(gcp) : [];
 
   return (
     <Panel
@@ -182,22 +203,28 @@ export function CodexUsagePanel() {
           <button
             className="button button--ghost button--icon button--iconOnly"
             onClick={onRefresh}
-            aria-label={current.kind === "gcp" ? "Refresh GCP usage live" : "Refresh Codex usage live"}
-            title={current.kind === "gcp" ? "Refresh GCP usage live" : "Refresh Codex usage live"}
+            aria-label={refreshUsageLabel}
+            title={refreshUsageLabel}
           >
             <RefreshIcon />
           </button>
         </div>
       }
     >
-      {current.kind === "account" && loading && <div className="state">Loading usage...</div>}
+      {current.kind === "account" && loading && <div className="state">{USAGE_COPY.accountLoading}</div>}
       {current.kind === "account" && statusError && (
-        <div className="state state--error">Plan status unavailable: {statusError}</div>
+        <div className="state state--error">
+          {USAGE_COPY.accountStatusErrorPrefix} {statusError}
+        </div>
       )}
       {current.kind === "account" && !loading && !statusError && <CodexAccountView account={current.account} />}
 
-      {current.kind === "gcp" && gcpLoading && <div className="state">Loading GCP usage...</div>}
-      {current.kind === "gcp" && gcpError && <div className="state state--error">GCP usage unavailable: {gcpError}</div>}
+      {current.kind === "gcp" && gcpLoading && <div className="state">{USAGE_COPY.gcpLoading}</div>}
+      {current.kind === "gcp" && gcpError && (
+        <div className="state state--error">
+          {USAGE_COPY.gcpUnavailablePrefix} {gcpError}
+        </div>
+      )}
       {current.kind === "gcp" && !gcpLoading && gcp && (
         <div className="usage">
           <section className="usage__hero usage__hero--gcp">
@@ -223,8 +250,8 @@ export function CodexUsagePanel() {
             </div>
             {showGcpDetails && (
               <div className="gcpUsage__details">
-                {topServices(gcp).length === 0 && <div className="gcpUsage__empty">No service costs yet.</div>}
-                {topServices(gcp).map((item) => (
+                {gcpServices.length === 0 && <div className="gcpUsage__empty">{USAGE_COPY.gcpNoServiceCosts}</div>}
+                {gcpServices.map((item) => (
                   <div className="gcpUsage__row" key={item.service}>
                     <div className="gcpUsage__service">{item.service}</div>
                     <div className="gcpUsage__cost">{formatCost(item.cost, gcp.currency)}</div>
@@ -236,7 +263,7 @@ export function CodexUsagePanel() {
         </div>
       )}
       {current.kind === "gcp" && !gcpLoading && !gcp && !gcpError && (
-        <div className="state">No GCP usage data available yet.</div>
+        <div className="state">{USAGE_COPY.gcpNoData}</div>
       )}
     </Panel>
   );

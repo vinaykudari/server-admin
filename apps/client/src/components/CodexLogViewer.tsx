@@ -55,6 +55,8 @@ const safeParseJson = (line: string): unknown | null => {
 function buildTimeline(lines: string[]): { timeline: TimelineItem[]; turn: TurnState } {
   const itemsById = new Map<string, TimelineItem>();
   const order: string[] = [];
+  const lastTouched = new Map<string, number>();
+  let touchSeq = 0;
   let rawSeq = 0;
 
   const turn: TurnState = { status: "unknown" };
@@ -63,6 +65,8 @@ function buildTimeline(lines: string[]): { timeline: TimelineItem[]; turn: TurnS
     if (!itemsById.has(item.id)) {
       order.push(item.id);
     }
+    touchSeq += 1;
+    lastTouched.set(item.id, touchSeq);
     itemsById.set(item.id, item);
   };
 
@@ -143,7 +147,8 @@ function buildTimeline(lines: string[]): { timeline: TimelineItem[]; turn: TurnS
 
   const timeline = order
     .map((id) => itemsById.get(id))
-    .filter((x): x is TimelineItem => Boolean(x));
+    .filter((x): x is TimelineItem => Boolean(x))
+    .sort((a, b) => (lastTouched.get(a.id) ?? 0) - (lastTouched.get(b.id) ?? 0));
 
   return { timeline, turn };
 }
@@ -160,7 +165,7 @@ const trimCommand = (cmd: string): string => {
 
 function statusLabel(turn: TurnState, items: TimelineItem[]): { label: string; tone: "ok" | "err" | "muted" } {
   const cmds = items.filter((i) => i.kind === "command") as CodexCommandItem[];
-  const running = cmds.filter((c) => !c.exitCode && c.status && c.status !== "completed");
+  const running = cmds.filter((c) => c.exitCode === null && (!c.status || c.status !== "completed"));
   const lastNonZero = [...cmds].reverse().find((c) => typeof c.exitCode === "number" && c.exitCode !== 0);
 
   if (running.length > 0) return { label: "running", tone: "muted" };
@@ -184,13 +189,15 @@ export function CodexLogViewer({ lines }: Props) {
 
   const summary = useMemo(() => {
     const cmds = filtered.filter((i) => i.kind === "command") as CodexCommandItem[];
-    const inProgress = cmds.filter((c) => (c.status && c.status !== "completed") || c.exitCode === null);
+    const inProgress = cmds.filter((c) => c.exitCode === null && (!c.status || c.status !== "completed"));
     const current = [...inProgress].reverse().find((c) => c.command) ?? null;
     const lastExit = [...cmds].reverse().find((c) => typeof c.exitCode === "number") ?? null;
     const lastNonZero = [...cmds].reverse().find((c) => typeof c.exitCode === "number" && c.exitCode !== 0) ?? null;
 
     return { inProgressCount: inProgress.length, current, lastExit, lastNonZero };
   }, [filtered]);
+
+  const newestFirst = useMemo(() => [...filtered].reverse(), [filtered]);
 
   const st = statusLabel(turn, filtered);
 
@@ -221,6 +228,7 @@ export function CodexLogViewer({ lines }: Props) {
           {summary.inProgressCount > 0 ? (
             <span className="codexlog__pill">in-progress: {summary.inProgressCount}</span>
           ) : null}
+          <span className="codexlog__pill">newest first</span>
           {turn.outputTokens ? <span className="codexlog__pill">out: {turn.outputTokens.toLocaleString()} tok</span> : null}
         </div>
       </div>
@@ -239,11 +247,14 @@ export function CodexLogViewer({ lines }: Props) {
         </div>
       ) : null}
 
+      <div className="codexlog__terminalLabel">$ codex output (live)</div>
       <div className="codexlog__timeline">
-        {filtered.map((entry) => {
+        {newestFirst.map((entry, idx) => {
+          const latestClass = idx === 0 ? " codexlog__card--latest" : "";
+
           if (entry.kind === "raw") {
             return (
-              <div key={entry.id} className="codexlog__card codexlog__card--raw">
+              <div key={entry.id} className={`codexlog__card codexlog__card--raw${latestClass}`}>
                 <pre className="codexlog__pre">{entry.text}</pre>
               </div>
             );
@@ -255,8 +266,8 @@ export function CodexLogViewer({ lines }: Props) {
                 key={entry.id}
                 className={
                   entry.role === "agent"
-                    ? "codexlog__card codexlog__card--agent"
-                    : "codexlog__card codexlog__card--reasoning"
+                    ? `codexlog__card codexlog__card--agent${latestClass}`
+                    : `codexlog__card codexlog__card--reasoning${latestClass}`
                 }
               >
                 <div className="codexlog__meta">
@@ -270,7 +281,7 @@ export function CodexLogViewer({ lines }: Props) {
 
           if (entry.kind === "file_change") {
             return (
-              <div key={entry.id} className="codexlog__card codexlog__card--file">
+              <div key={entry.id} className={`codexlog__card codexlog__card--file${latestClass}`}>
                 <div className="codexlog__meta">
                   <span className="codexlog__badge">File change</span>
                   {entry.status && <span className="codexlog__badge codexlog__badge--muted">{entry.status}</span>}
@@ -301,7 +312,7 @@ export function CodexLogViewer({ lines }: Props) {
           const showDetails = out.length > 2000 || outLines > 40;
 
           return (
-            <div key={entry.id} className="codexlog__card codexlog__card--cmd">
+            <div key={entry.id} className={`codexlog__card codexlog__card--cmd${latestClass}`}>
               <div className="codexlog__meta">
                 <span className="codexlog__badge">Command</span>
                 {isDone ? (

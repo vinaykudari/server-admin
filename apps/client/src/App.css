@@ -1,15 +1,17 @@
 .app {
   min-height: 100vh;
   color: var(--text);
-  padding: 3rem clamp(1.5rem, 3vw, 3.5rem) 4rem;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 1.35rem clamp(1rem, 2.2vw, 2rem) 2rem;
   position: relative;
 }
 
 .app__glow {
   position: absolute;
-  inset: -20% 0 auto;
-  height: 40vh;
-  background: radial-gradient(circle at top, rgba(57, 255, 164, 0.2), transparent 65%);
+  inset: -15% 0 auto;
+  height: 34vh;
+  background: radial-gradient(circle at top, rgba(57, 255, 164, 0.12), transparent 72%);
   pointer-events: none;
   z-index: 0;
 }
@@ -18,96 +20,74 @@
   position: relative;
   z-index: 1;
   display: flex;
-  justify-content: space-between;
-  gap: 2rem;
+  justify-content: flex-end;
+  gap: 0.5rem;
   align-items: center;
-  margin-bottom: 2.5rem;
-}
-
-.app__kicker {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.4em;
-  color: var(--accent);
-  margin-bottom: 0.4rem;
-}
-
-.app__subtitle {
-  color: var(--muted);
-  max-width: 40ch;
-}
-
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2.5rem;
-  position: relative;
-  z-index: 1;
-}
-
-.stat {
-  background: var(--surface);
+  margin-bottom: 0.7rem;
+  border-radius: 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 1rem 1.2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.stat__label {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  color: var(--muted);
-}
-
-.stat__value {
-  font-size: 1.3rem;
-  font-weight: 600;
+  padding: 0.44rem 0.55rem;
+  background: linear-gradient(165deg, rgba(8, 16, 26, 0.92), rgba(5, 12, 20, 0.8));
+  backdrop-filter: blur(8px);
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 1.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
   position: relative;
   z-index: 1;
 }
 
 .button {
-  background: linear-gradient(135deg, rgba(57, 255, 164, 0.2), rgba(0, 170, 255, 0.2));
+  background: linear-gradient(145deg, rgba(57, 255, 164, 0.18), rgba(0, 170, 255, 0.14));
   color: var(--text);
-  border: 1px solid rgba(57, 255, 164, 0.4);
-  padding: 0.7rem 1.4rem;
-  border-radius: 999px;
+  border: 1px solid rgba(57, 255, 164, 0.35);
+  padding: 0.48rem 0.82rem;
+  border-radius: 10px;
   cursor: pointer;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  font-size: 0.84rem;
+  line-height: 1.1;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.button--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.button--iconOnly {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
 }
 
 .button:hover {
-  border-color: rgba(57, 255, 164, 0.8);
+  border-color: rgba(57, 255, 164, 0.75);
 }
 
 .pill {
-  font-size: 0.7rem;
-  padding: 0.35rem 0.75rem;
+  font-size: 0.62rem;
+  padding: 0.24rem 0.5rem;
   border-radius: 999px;
   border: 1px solid rgba(57, 255, 164, 0.4);
   text-transform: uppercase;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.16em;
   color: var(--accent);
 }
 
 .state {
-  padding: 1rem;
+  padding: 0.72rem 0.8rem;
   background: rgba(5, 14, 26, 0.7);
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   color: var(--muted);
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
 }
 
 .state--error {
@@ -115,21 +95,13 @@
   color: rgb(255, 161, 161);
 }
 
-@media (max-width: 720px) {
-  .app {
-    padding: 2rem 1.2rem 3rem;
-  }
-
-  .app__header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
-
 .app__headerRight {
   display: flex;
-  gap: 1rem;
+  gap: 0.45rem;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
 }
 
 .grid--single {
@@ -137,10 +109,20 @@
 }
 
 .button--ghost {
-  background: rgba(6, 12, 20, 0.35);
+  background: rgba(6, 12, 20, 0.45);
+  border-color: rgba(93, 120, 150, 0.38);
 }
 
 @media (max-width: 720px) {
+  .app {
+    padding: 1rem 0.7rem 1.6rem;
+  }
+
+  .app__header {
+    justify-content: flex-end;
+    padding: 0.4rem 0.5rem;
+  }
+
   .app__headerRight {
     width: 100%;
     justify-content: space-between;
@@ -149,7 +131,7 @@
 
 .actionRow {
   display: flex;
-  gap: 0.6rem;
+  gap: 0.42rem;
   align-items: center;
   flex-wrap: wrap;
 }

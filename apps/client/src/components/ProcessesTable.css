@@ -7,6 +7,7 @@
 
 .procs__table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
 }
 
@@ -35,4 +36,16 @@
   font-size: 0.85rem;
   color: rgba(230, 242, 255, 0.9);
   word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .procs__table th,
+  .procs__table td {
+    padding: 0.66rem 0.68rem;
+  }
+
+  .procs__table th {
+    letter-spacing: 0.14em;
+    font-size: 0.68rem;
+  }
 }

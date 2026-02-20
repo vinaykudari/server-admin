@@ -28,8 +28,11 @@ Production-ready React + TypeScript dashboard for Vinay's server operations.
 Server environment variables:
 
 - `PORT` (default `4175`)
-- `WORKSPACE_ROOT` (default `/root/.openclaw/workspace`)
+- `WORKSPACE_ROOT` (default `/home/openclaw/.openclaw/workspace`)
 - `CLIENT_DIST_PATH` (defaults to `apps/client/dist`)
+- `MANAGED_ENV_PATH` (default `$WORKSPACE_ROOT/.env.shared`)
+- `CREDENTIAL_STORE_PATH` (default `$WORKSPACE_ROOT/credentials/store.json`)
+- Credential store schema: records with `domain`, `username`, `password`, `updatedAt`
 
 ## Deployment Notes
 
@@ -38,6 +41,7 @@ Server environment variables:
   - API: `apps/server/dist`
 - Systemd service runs `node apps/server/dist/index.js` in `/srv/apps/server-admin`.
 - Nginx reverse proxies `server.vinaykudari.com` to `127.0.0.1:4175`.
+- Managed config files are initialized automatically at server startup and stored with OpenClaw-compatible ownership/permissions where possible.
 
 ## Rollback
 

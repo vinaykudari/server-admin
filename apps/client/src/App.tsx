@@ -1,9 +1,8 @@
 import "./App.css";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Panel } from "./components/Panel";
-import { LogViewer } from "./components/LogViewer";
 import { Tabs } from "./components/Tabs";
 import { JobsTable } from "./components/JobsTable";
 import { ActionsFeed } from "./components/ActionsFeed";
@@ -11,36 +10,38 @@ import { LogLines } from "./components/LogLines";
 import { CodexLogViewer } from "./components/CodexLogViewer";
 import { JobsPage } from "./components/JobsPage";
 import { CodexUsagePanel } from "./components/CodexUsagePanel";
+import { ConfigPage } from "./components/ConfigPage";
+import { AgentLogsPage } from "./components/AgentLogsPage";
+import { RefreshIcon } from "./components/RefreshIcon";
+import { RunbookRecent } from "./components/RunbookRecent";
 import { useLogs } from "./hooks/useLogs";
 import { useActiveJobs } from "./hooks/useActiveJobs";
 import { useActionsStream } from "./hooks/useActionsStream";
 import { useGatewayLog } from "./hooks/useGatewayLog";
 import { useJobOutput } from "./hooks/useJobOutput";
 import { useRecentJobs } from "./hooks/useRecentJobs";
-import type { LogDocument } from "./types";
 
-type TabId = "overview" | "jobs" | "live";
+type TabId = "overview" | "jobs" | "live" | "agents" | "config";
+const TAB_STORAGE_KEY = "server-admin.active-tab";
 
-const countTasks = (doc?: LogDocument) => {
-  if (!doc) return { open: 0, done: 0 };
-  const open = doc.content.match(/^- \[ \]/gm)?.length ?? 0;
-  const done = doc.content.match(/^- \[[xX]\]/gm)?.length ?? 0;
-  return { open, done };
+const isTabId = (value: string | null): value is TabId =>
+  value === "overview" || value === "jobs" || value === "live" || value === "agents" || value === "config";
+
+const getInitialTab = (): TabId => {
+  if (typeof window === "undefined") return "overview";
+  try {
+    const saved = window.localStorage.getItem(TAB_STORAGE_KEY);
+    return isTabId(saved) ? saved : "overview";
+  } catch {
+    return "overview";
+  }
 };
 
-const Stat = ({ label, value }: { label: string; value: string }) => (
-  <div className="stat">
-    <span className="stat__label">{label}</span>
-    <span className="stat__value">{value}</span>
-  </div>
-);
-
 function App() {
-  const [tab, setTab] = useState<TabId>("overview");
+  const [tab, setTab] = useState<TabId>(getInitialTab);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
 
   const { data, loading, error, refresh } = useLogs();
-  const tasksStats = countTasks(data?.tasks);
 
   const { jobs, warning, error: jobsError } = useActiveJobs(4000);
   const recent = useRecentJobs(6000, 80);
@@ -56,7 +57,6 @@ function App() {
 
   const {
     connected: jobConnected,
-    path: jobPath,
     lines: jobLines,
     error: jobError,
     paused: jobPaused,
@@ -64,57 +64,49 @@ function App() {
     reload: reloadJobOutput,
   } = useJobOutput(selectedJob);
 
-  const lastUpdate = useMemo(() => {
-    if (!data) return "-";
-    return new Date(data.runbook.updatedAt).toLocaleString();
-  }, [data]);
+  const setActiveTab = (nextTab: TabId) => {
+    setTab(nextTab);
+    if (nextTab !== "live") {
+      setSelectedJob(null);
+    }
+    try {
+      window.localStorage.setItem(TAB_STORAGE_KEY, nextTab);
+    } catch {
+      // Ignore storage write issues and keep app state in memory.
+    }
+  };
 
   const openJobInLive = (messageId: string) => {
     setSelectedJob(messageId);
-    setTab("live");
+    setActiveTab("live");
   };
 
   return (
     <div className="app">
       <div className="app__glow" />
       <header className="app__header">
-        <div>
-          <p className="app__kicker">Server Ops</p>
-          <h1>Vinay System Console</h1>
-          <p className="app__subtitle">Live operational memory from this VM.</p>
-        </div>
         <div className="app__headerRight">
-          <Tabs
-            active={tab}
-            onChange={(id) => {
-              setTab(id);
-              if (id !== "live") setSelectedJob(null);
-            }}
-          />
-          <button className="button" onClick={() => void refresh()}>
-            Refresh
+          <Tabs active={tab} onChange={(id) => setActiveTab(id)} />
+          <button
+            className="button button--icon button--iconOnly"
+            onClick={() => void refresh()}
+            aria-label="Refresh dashboard"
+            title="Refresh dashboard"
+          >
+            <RefreshIcon />
           </button>
         </div>
       </header>
-
-      <section className="stats">
-        <Stat label="Open tasks" value={tasksStats.open.toString()} />
-        <Stat label="Done tasks" value={tasksStats.done.toString()} />
-        <Stat label="Last update" value={lastUpdate} />
-      </section>
 
       {loading && <div className="state">Loading runbook data...</div>}
       {error && <div className="state state--error">{error}</div>}
 
       {tab === "overview" && !loading && data && (
         <div className="grid">
-          <Panel title="Runbook" subtitle="Operational log" actions={<span className="pill">RUNBOOK.md</span>}>
-            <LogViewer doc={data.runbook} />
-          </Panel>
-          <Panel title="Tasks" subtitle="Active + backlog" actions={<span className="pill">TASKS.md</span>}>
-            <LogViewer doc={data.tasks} />
-          </Panel>
           <CodexUsagePanel />
+          <Panel title="Runbook" actions={<span className="pill">Recent</span>}>
+            <RunbookRecent doc={data.runbook} />
+          </Panel>
         </div>
       )}
 
@@ -124,13 +116,10 @@ function App() {
 
       {tab === "live" && (
         <div className="grid grid--single">
-          <Panel title="Active Jobs" subtitle="Running Codex jobs" actions={<span className="pill">OPENCLAW</span>}>
+          <Panel title="Active Jobs" actions={<span className="pill">Live</span>}>
             {warning && <div className="state">Warning: {warning}</div>}
             {jobsError && <div className="state state--error">{jobsError}</div>}
             <JobsTable jobs={jobs} selected={selectedJob} onSelect={(id) => setSelectedJob(id)} />
-            <div className="state">
-              Want a completed/failed job? Use the Jobs tab, then click a row to open it here.
-            </div>
           </Panel>
 
           <Panel
@@ -154,8 +143,7 @@ function App() {
               )
             }
           >
-            {!selectedJob && <div className="state">Click an active job above to stream its Codex output.</div>}
-            {selectedJob && jobPath && <div className="state">Log file: {jobPath}</div>}
+            {!selectedJob && <div className="state">Select a job.</div>}
             {selectedJob && jobError && <div className="state state--error">{jobError}</div>}
             {selectedJob && <CodexLogViewer lines={jobLines} />}
           </Panel>
@@ -187,6 +175,9 @@ function App() {
           </Panel>
         </div>
       )}
+
+      {tab === "config" && <ConfigPage />}
+      {tab === "agents" && <AgentLogsPage />}
     </div>
   );
 }

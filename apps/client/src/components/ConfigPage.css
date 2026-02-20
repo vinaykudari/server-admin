@@ -1,0 +1,104 @@
+.configMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.configMeta code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.configForm {
+  display: grid;
+  gap: 0.7rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.configForm--env {
+  grid-template-columns: minmax(180px, 260px) minmax(220px, 1fr) auto;
+}
+
+.configForm--credential {
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) minmax(180px, 1fr) auto;
+}
+
+.configInput {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(8, 16, 26, 0.65);
+  color: var(--text);
+  padding: 0.65rem 0.8rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.84rem;
+}
+
+.configInput:focus {
+  outline: none;
+  border-color: rgba(57, 255, 164, 0.7);
+}
+
+.configTableWrap {
+  overflow-x: auto;
+}
+
+.configTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.configTable th,
+.configTable td {
+  text-align: left;
+  padding: 0.6rem 0.55rem;
+  border-bottom: 1px solid rgba(85, 120, 160, 0.2);
+  vertical-align: top;
+}
+
+.configTable th {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+}
+
+.configTable code {
+  font-family: "JetBrains Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.configEmpty {
+  color: var(--muted);
+  text-align: center;
+}
+
+.button--small {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.78rem;
+}
+
+.actionGroup {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1040px) {
+  .configForm--credential {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .configForm {
+    grid-template-columns: 1fr;
+  }
+}
