@@ -68,13 +68,13 @@ export function ConfigPage() {
       return;
     }
 
-    setSaveState({ kind: "saving", message: "Saving environment variable..." });
+    setSaveState({ kind: "saving", message: "Saving VM environment variable..." });
     try {
       await upsertManagedEnv(envKey.trim(), envValue);
       setEnvKey("");
       setEnvValue("");
       await load();
-      setSaveState({ kind: "ok", message: "Environment variable saved." });
+      setSaveState({ kind: "ok", message: "VM environment variable saved." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save environment variable";
       setSaveState({ kind: "error", message });
@@ -216,7 +216,7 @@ export function ConfigPage() {
               {(envData?.entries.length ?? 0) === 0 && (
                 <tr>
                   <td colSpan={3} className="configEmpty">
-                    No managed env variables yet.
+                    No VM environment variables found.
                   </td>
                 </tr>
               )}

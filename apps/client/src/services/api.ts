@@ -151,7 +151,7 @@ export const fetchGcpBilling = async (refresh = false): Promise<GcpBillingPayloa
 export const fetchManagedEnv = async (): Promise<ManagedEnvPayload> => {
   const response = await fetch("/api/config/env");
   if (!response.ok) {
-    throw new Error(`Failed to fetch managed env vars: ${response.status}`);
+    throw new Error(`Failed to fetch VM env vars: ${response.status}`);
   }
   return response.json() as Promise<ManagedEnvPayload>;
 };

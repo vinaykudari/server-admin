@@ -13,7 +13,11 @@ export const runbookPath = path.join(workspaceRoot, "RUNBOOK.md");
 export const tasksPath = path.join(workspaceRoot, "TASKS.md");
 export const actionsLogPath = path.join(workspaceRoot, "logs", "actions.ndjson");
 export const managedEnvPath =
-  process.env.MANAGED_ENV_PATH ?? path.join(workspaceRoot, ".env.shared");
+  process.env.VM_ENV_PATH ??
+  process.env.MANAGED_ENV_PATH ??
+  "/etc/openclaw/openclaw.env";
+export const sharedEnvMirrorPath =
+  process.env.SHARED_ENV_PATH ?? path.join(workspaceRoot, ".env.shared");
 export const credentialStorePath =
   process.env.CREDENTIAL_STORE_PATH ??
   path.join(workspaceRoot, "credentials", "store.json");

@@ -11,8 +11,9 @@ import "./CodexUsagePanel.css";
 const USAGE_COPY = {
   unknown: "Unknown",
   codexUsageTitle: "Codex Usage",
+  accountMetaLabel: "Account",
   primaryAccountLabel: "Primary",
-  accountIdPrefix: "Account ID:",
+  gcpTitle: "GCP Usage",
   accountStatusUnavailable: "No status data available yet for this account.",
   accountLoading: "Loading usage...",
   accountStatusErrorPrefix: "Plan status unavailable:",
@@ -20,9 +21,19 @@ const USAGE_COPY = {
   gcpUnavailablePrefix: "GCP usage unavailable:",
   gcpNoData: "No GCP usage data available yet.",
   gcpNoServiceCosts: "No service costs yet.",
+  gcpBudgetEventsTitle: "Budget Pub/Sub Events",
+  gcpNoBudgetEvents: "No budget events received yet.",
   refreshCodex: "Refresh Codex usage live",
   refreshGcp: "Refresh GCP usage live",
 } as const;
+
+const getAccountLabel = (account: CodexAccountStatusPayload): string =>
+  account.id.trim().toLowerCase() === "primary" ? USAGE_COPY.primaryAccountLabel : account.label;
+const getViewLetter = (view: ViewItem): string => {
+  if (view.kind === "gcp") return "G";
+  const label = getAccountLabel(view.account).trim();
+  return label ? label[0]!.toUpperCase() : "A";
+};
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 const pct = (n: number | null) => (typeof n === "number" && Number.isFinite(n) ? clamp(n, 0, 100) : null);
@@ -51,6 +62,16 @@ const formatCost = (value: number, currency = "USD") =>
     currency,
     maximumFractionDigits: 2,
   }).format(value);
+
+const formatMaybeCost = (value: number | null, currency = "USD") =>
+  typeof value === "number" && Number.isFinite(value) ? formatCost(value, currency) : USAGE_COPY.unknown;
+
+const formatTimestamp = (value: string | null | undefined) => {
+  if (!value) return USAGE_COPY.unknown;
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return value;
+  return new Date(ts).toLocaleString();
+};
 
 const topServices = (data: GcpBillingPayload): GcpBillingServiceCost[] =>
   data.topServices.monthToDate.length > 0 ? data.topServices.monthToDate : data.topServices.last7d;
@@ -85,22 +106,16 @@ const StatusOrb = ({ title, limit, className }: { title: string; limit: CodexSta
 
 function CodexAccountView({ account }: { account: CodexAccountStatusPayload }) {
   const status = account.status;
-  const isPrimaryAccount = account.id.trim().toLowerCase() === "primary";
-  const showAccountId = !isPrimaryAccount && account.id.trim().toLowerCase() !== account.label.trim().toLowerCase();
-  const accountLabel = isPrimaryAccount ? USAGE_COPY.primaryAccountLabel : account.label;
+  const accountLabel = getAccountLabel(account);
 
   return (
     <div className="usage">
       <section className="usage__hero">
         <div className="usage__heroBg" />
         <div className="usage__meta">
-          <div className="usage__metaLabel">{USAGE_COPY.codexUsageTitle}</div>
-          <div className="usage__metaValue">{accountLabel}</div>
-          {showAccountId && (
-            <div className="usage__metaSub">
-              {USAGE_COPY.accountIdPrefix} {account.id}
-            </div>
-          )}
+          <div className="usage__metaLabel">
+            {USAGE_COPY.accountMetaLabel}: {accountLabel}
+          </div>
         </div>
 
         {!status && <div className="state">{USAGE_COPY.accountStatusUnavailable}</div>}
@@ -149,7 +164,8 @@ export function CodexUsagePanel() {
     }
   }, [viewIndex, views.length]);
 
-  const current = views[Math.max(0, Math.min(viewIndex, views.length - 1))] ?? { kind: "gcp" as const };
+  const activeViewIndex = Math.max(0, Math.min(viewIndex, views.length - 1));
+  const current = views[activeViewIndex] ?? { kind: "gcp" as const };
 
   const refreshGcp = async (force = false) => {
     setGcpLoading(true);
@@ -178,18 +194,16 @@ export function CodexUsagePanel() {
     void refresh({ refreshStatus: true });
   };
 
-  const next = () => {
+  const selectView = (idx: number) => {
     setShowGcpDetails(false);
-    setViewIndex((idx) => {
-      if (views.length === 0) return 0;
-      return (idx + 1) % views.length;
-    });
+    setViewIndex(idx);
   };
 
-  const title = current.kind === "account" ? USAGE_COPY.codexUsageTitle : "GCP Usage";
+  const title = current.kind === "account" ? USAGE_COPY.codexUsageTitle : USAGE_COPY.gcpTitle;
   const isGcpView = current.kind === "gcp";
   const refreshUsageLabel = isGcpView ? USAGE_COPY.refreshGcp : USAGE_COPY.refreshCodex;
   const gcpServices = gcp ? topServices(gcp) : [];
+  const gcpBudgetCurrency = gcp?.budgetEvents.payload.currencyCode ?? gcp?.currency ?? "USD";
 
   return (
     <Panel
@@ -197,9 +211,27 @@ export function CodexUsagePanel() {
       inlineHeader
       actions={
         <div className="usage__actions">
-          <button className="button button--ghost usage__next" onClick={next}>
-            Next
-          </button>
+          <div className="usage__nav" role="tablist" aria-label="Usage views">
+            {views.map((view, idx) => {
+              const isActive = idx === activeViewIndex;
+              const viewLabel =
+                view.kind === "account" ? `${USAGE_COPY.codexUsageTitle}: ${getAccountLabel(view.account)}` : USAGE_COPY.gcpTitle;
+
+              return (
+                <button
+                  key={view.kind === "account" ? `account-${view.account.id}-${idx}` : "gcp"}
+                  className={`usage__navSquare${isActive ? " usage__navSquare--active" : ""}`}
+                  onClick={() => selectView(idx)}
+                  role="tab"
+                  aria-label={viewLabel}
+                  aria-selected={isActive}
+                  title={viewLabel}
+                >
+                  {getViewLetter(view)}
+                </button>
+              );
+            })}
+          </div>
           <button
             className="button button--ghost button--icon button--iconOnly"
             onClick={onRefresh}
@@ -229,17 +261,24 @@ export function CodexUsagePanel() {
         <div className="usage">
           <section className="usage__hero usage__hero--gcp">
             <div className="usage__heroBg usage__heroBg--gcp" />
+            {gcp.fallback?.kind === "budget_snapshot" && <div className="state">{gcp.fallback.note}</div>}
             <div className="gcpUsage__totals">
               <div className="gcpUsage__tile">
-                <div className="gcpUsage__label">Today</div>
+                <div className="gcpUsage__label">
+                  {gcp.fallback?.kind === "budget_snapshot" ? "Today (Budget Snapshot)" : "Today (No Credits)"}
+                </div>
                 <div className="gcpUsage__value">{formatCost(gcp.totals.today, gcp.currency)}</div>
               </div>
               <div className="gcpUsage__tile">
-                <div className="gcpUsage__label">7D</div>
+                <div className="gcpUsage__label">
+                  {gcp.fallback?.kind === "budget_snapshot" ? "7D (Budget Snapshot)" : "7D (No Credits)"}
+                </div>
                 <div className="gcpUsage__value">{formatCost(gcp.totals.last7d, gcp.currency)}</div>
               </div>
               <div className="gcpUsage__tile">
-                <div className="gcpUsage__label">MTD</div>
+                <div className="gcpUsage__label">
+                  {gcp.fallback?.kind === "budget_snapshot" ? "MTD (Budget Snapshot)" : "MTD (No Credits)"}
+                </div>
                 <div className="gcpUsage__value">{formatCost(gcp.totals.monthToDate, gcp.currency)}</div>
               </div>
             </div>
@@ -250,13 +289,77 @@ export function CodexUsagePanel() {
             </div>
             {showGcpDetails && (
               <div className="gcpUsage__details">
+                <div className="gcpUsage__sectionTitle">Service Costs (No Credits)</div>
                 {gcpServices.length === 0 && <div className="gcpUsage__empty">{USAGE_COPY.gcpNoServiceCosts}</div>}
                 {gcpServices.map((item) => (
                   <div className="gcpUsage__row" key={item.service}>
                     <div className="gcpUsage__service">{item.service}</div>
-                    <div className="gcpUsage__cost">{formatCost(item.cost, gcp.currency)}</div>
+                    <div className="gcpUsage__cost">{formatCost(item.grossCost, gcp.currency)}</div>
                   </div>
                 ))}
+                <div className="gcpUsage__sectionTitle">Net After Credits</div>
+                <div className="gcpUsage__row">
+                  <div className="gcpUsage__service">Today</div>
+                  <div className="gcpUsage__cost">{formatCost(gcp.netTotals.today, gcp.currency)}</div>
+                </div>
+                <div className="gcpUsage__row">
+                  <div className="gcpUsage__service">7D</div>
+                  <div className="gcpUsage__cost">{formatCost(gcp.netTotals.last7d, gcp.currency)}</div>
+                </div>
+                <div className="gcpUsage__row">
+                  <div className="gcpUsage__service">MTD</div>
+                  <div className="gcpUsage__cost">{formatCost(gcp.netTotals.monthToDate, gcp.currency)}</div>
+                </div>
+                <div className="gcpUsage__sectionTitle">Credit Adjustments</div>
+                <div className="gcpUsage__row">
+                  <div className="gcpUsage__service">Today</div>
+                  <div className="gcpUsage__cost">{formatCost(gcp.creditTotals.today, gcp.currency)}</div>
+                </div>
+                <div className="gcpUsage__row">
+                  <div className="gcpUsage__service">7D</div>
+                  <div className="gcpUsage__cost">{formatCost(gcp.creditTotals.last7d, gcp.currency)}</div>
+                </div>
+                <div className="gcpUsage__row">
+                  <div className="gcpUsage__service">MTD</div>
+                  <div className="gcpUsage__cost">{formatCost(gcp.creditTotals.monthToDate, gcp.currency)}</div>
+                </div>
+                <div className="gcpUsage__sectionTitle">{USAGE_COPY.gcpBudgetEventsTitle}</div>
+                {!gcp.budgetEvents.available && <div className="gcpUsage__empty">{USAGE_COPY.gcpNoBudgetEvents}</div>}
+                {gcp.budgetEvents.available && (
+                  <>
+                    <div className="gcpUsage__row">
+                      <div className="gcpUsage__service">Budget</div>
+                      <div className="gcpUsage__cost">{gcp.budgetEvents.payload.budgetDisplayName ?? USAGE_COPY.unknown}</div>
+                    </div>
+                    <div className="gcpUsage__row">
+                      <div className="gcpUsage__service">Cost Snapshot</div>
+                      <div className="gcpUsage__cost">
+                        {formatMaybeCost(gcp.budgetEvents.payload.costAmount, gcpBudgetCurrency)} /{" "}
+                        {formatMaybeCost(gcp.budgetEvents.payload.budgetAmount, gcpBudgetCurrency)}
+                      </div>
+                    </div>
+                    <div className="gcpUsage__row">
+                      <div className="gcpUsage__service">Threshold</div>
+                      <div className="gcpUsage__cost">
+                        {typeof gcp.budgetEvents.payload.alertThresholdExceeded === "number"
+                          ? `${Math.round(gcp.budgetEvents.payload.alertThresholdExceeded * 100)}%`
+                          : USAGE_COPY.unknown}
+                      </div>
+                    </div>
+                    <div className="gcpUsage__row">
+                      <div className="gcpUsage__service">Interval Start</div>
+                      <div className="gcpUsage__cost">{formatTimestamp(gcp.budgetEvents.payload.costIntervalStart)}</div>
+                    </div>
+                    <div className="gcpUsage__row">
+                      <div className="gcpUsage__service">Published</div>
+                      <div className="gcpUsage__cost">{formatTimestamp(gcp.budgetEvents.lastPublishTime)}</div>
+                    </div>
+                    <div className="gcpUsage__row">
+                      <div className="gcpUsage__service">Watcher Check</div>
+                      <div className="gcpUsage__cost">{formatTimestamp(gcp.budgetEvents.lastCheckedAt)}</div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </section>

@@ -95,12 +95,44 @@ export type CodexAccountsSummary = {
 
 export type GcpBillingServiceCost = {
   service: string;
-  cost: number;
+  grossCost: number;
+  credits: number;
+  netCost: number;
 };
 
 export type GcpBillingDailyCost = {
   day: string;
-  cost: number;
+  grossCost: number;
+  credits: number;
+  netCost: number;
+};
+
+export type GcpBillingTotals = {
+  today: number;
+  last7d: number;
+  monthToDate: number;
+};
+
+export type GcpBudgetPubsubEventPayload = {
+  budgetDisplayName: string | null;
+  costAmount: number | null;
+  budgetAmount: number | null;
+  alertThresholdExceeded: number | null;
+  currencyCode: string | null;
+  costIntervalStart: string | null;
+};
+
+export type GcpBudgetPubsubEventSummary = {
+  source: "gcp-budget-pubsub-watch";
+  statePath: string;
+  available: boolean;
+  lastCheckedAt: string | null;
+  lastPublishTime: string | null;
+  lastMessageId: string | null;
+  pulledCount: number;
+  ackedCount: number;
+  lastNotified: boolean;
+  payload: GcpBudgetPubsubEventPayload;
 };
 
 export type GcpBillingSummary = {
@@ -110,16 +142,19 @@ export type GcpBillingSummary = {
   capturedAt: string;
   ageSeconds: number;
   currency: string;
-  totals: {
-    today: number;
-    last7d: number;
-    monthToDate: number;
-  };
+  totals: GcpBillingTotals;
+  netTotals: GcpBillingTotals;
+  creditTotals: GcpBillingTotals;
   topServices: {
     last7d: GcpBillingServiceCost[];
     monthToDate: GcpBillingServiceCost[];
   };
   daily: GcpBillingDailyCost[];
+  budgetEvents: GcpBudgetPubsubEventSummary;
+  fallback?: {
+    kind: "budget_snapshot";
+    note: string;
+  };
 };
 
 const CODEX_STATUS_URL =
@@ -132,9 +167,15 @@ const GCP_BILLING_ACCOUNT_ID = process.env.GCP_BILLING_ACCOUNT_ID?.trim() ?? "";
 const GCP_BILLING_PROJECT_ID = process.env.GCP_BILLING_PROJECT_ID?.trim() ?? "";
 const GCP_BILLING_LOOKBACK_DAYS = Number(process.env.GCP_BILLING_LOOKBACK_DAYS ?? "45");
 const GCP_BILLING_CACHE_MS = Number(process.env.GCP_BILLING_CACHE_MS ?? "300000");
+const GCP_BILLING_ADC_PATH =
+  process.env.GCP_BILLING_ADC_PATH?.trim() || "/root/.config/gcloud/application_default_credentials.json";
+const GCP_BILLING_QUOTA_PROJECT = process.env.GCP_BILLING_QUOTA_PROJECT?.trim() ?? "";
+const GCP_BUDGET_PUBSUB_STATE_PATH =
+  process.env.GCP_BUDGET_PUBSUB_STATE_PATH?.trim() || "/var/lib/gcp-budget-pubsub-watch/state.json";
 
 let cachedBearerToken: string | null | undefined;
 let cachedGcpSummary: { atMs: number; data: GcpBillingSummary } | null = null;
+let cachedGcpAccessToken: { token: string; expiresAtMs: number } | null = null;
 
 function emptyTotals(): UsageTotals {
   return { runs: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -384,37 +425,404 @@ function assertBillingTable(value: string): string {
 type BillingRow = {
   day?: string;
   service?: string;
-  cost?: string | number;
+  grossCost?: string | number;
+  credits?: string | number;
+  netCost?: string | number;
   currency?: string;
+};
+
+type GcpAdcCredentials = {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+};
+
+type BigQueryRow = {
+  f?: Array<{ v?: unknown }>;
+};
+
+type BigQueryErrorDetail = {
+  reason?: string;
+  message?: string;
+};
+
+type BigQueryQueryResponse = {
+  rows?: unknown[];
+  pageToken?: string;
+  jobComplete?: boolean;
+  jobReference?: {
+    jobId?: string;
+    location?: string;
+  };
+  error?: {
+    message?: string;
+    errors?: BigQueryErrorDetail[];
+  };
 };
 
 function dayUtc(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function sumRange(rows: Array<{ day: string; cost: number }>, startDay: string, endDay: string): number {
+function sumRange(
+  rows: Array<{ day: string; grossCost: number; credits: number; netCost: number }>,
+  startDay: string,
+  endDay: string,
+  field: "grossCost" | "credits" | "netCost",
+): number {
   let total = 0;
   for (const row of rows) {
-    if (row.day >= startDay && row.day <= endDay) total += row.cost;
+    if (row.day >= startDay && row.day <= endDay) total += row[field];
   }
   return total;
 }
 
 function topServicesInRange(
-  rows: Array<{ day: string; service: string; cost: number }>,
+  rows: Array<{ day: string; service: string; grossCost: number; credits: number; netCost: number }>,
   startDay: string,
   endDay: string,
   limit = 6,
 ): GcpBillingServiceCost[] {
-  const map = new Map<string, number>();
+  const map = new Map<string, { grossCost: number; credits: number; netCost: number }>();
   for (const row of rows) {
     if (row.day < startDay || row.day > endDay) continue;
-    map.set(row.service, (map.get(row.service) ?? 0) + row.cost);
+    const curr = map.get(row.service) ?? { grossCost: 0, credits: 0, netCost: 0 };
+    curr.grossCost += row.grossCost;
+    curr.credits += row.credits;
+    curr.netCost += row.netCost;
+    map.set(row.service, curr);
   }
   return [...map.entries()]
-    .map(([service, cost]) => ({ service, cost }))
-    .sort((a, b) => b.cost - a.cost)
+    .map(([service, values]) => ({ service, ...values }))
+    .sort((a, b) => b.grossCost - a.grossCost)
     .slice(0, Math.max(1, Math.min(20, limit)));
+}
+
+function emptyBudgetPubsubEventSummary(): GcpBudgetPubsubEventSummary {
+  return {
+    source: "gcp-budget-pubsub-watch",
+    statePath: GCP_BUDGET_PUBSUB_STATE_PATH,
+    available: false,
+    lastCheckedAt: null,
+    lastPublishTime: null,
+    lastMessageId: null,
+    pulledCount: 0,
+    ackedCount: 0,
+    lastNotified: false,
+    payload: {
+      budgetDisplayName: null,
+      costAmount: null,
+      budgetAmount: null,
+      alertThresholdExceeded: null,
+      currencyCode: null,
+      costIntervalStart: null,
+    },
+  };
+}
+
+async function readBudgetPubsubEventSummary(): Promise<GcpBudgetPubsubEventSummary> {
+  let raw = "";
+  try {
+    raw = await fs.readFile(GCP_BUDGET_PUBSUB_STATE_PATH, "utf8");
+  } catch {
+    return emptyBudgetPubsubEventSummary();
+  }
+
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return emptyBudgetPubsubEventSummary();
+  }
+
+  const payloadRaw =
+    parsed.lastPayload && typeof parsed.lastPayload === "object"
+      ? (parsed.lastPayload as Record<string, unknown>)
+      : {};
+
+  const summary: GcpBudgetPubsubEventSummary = {
+    source: "gcp-budget-pubsub-watch",
+    statePath: GCP_BUDGET_PUBSUB_STATE_PATH,
+    available: Boolean(maybeString(parsed.lastMessageId) || maybeString(parsed.lastPublishTime) || maybeString(payloadRaw.budgetDisplayName)),
+    lastCheckedAt: maybeString(parsed.lastCheckedAt),
+    lastPublishTime: maybeString(parsed.lastPublishTime),
+    lastMessageId: maybeString(parsed.lastMessageId),
+    pulledCount: maybeNumber(parsed.pulledCount) ?? 0,
+    ackedCount: maybeNumber(parsed.ackedCount) ?? 0,
+    lastNotified: maybeBool(parsed.lastNotified) ?? false,
+    payload: {
+      budgetDisplayName: maybeString(payloadRaw.budgetDisplayName),
+      costAmount: maybeNumber(payloadRaw.costAmount),
+      budgetAmount: maybeNumber(payloadRaw.budgetAmount),
+      alertThresholdExceeded: maybeNumber(payloadRaw.alertThresholdExceeded),
+      currencyCode: maybeString(payloadRaw.currencyCode),
+      costIntervalStart: maybeString(payloadRaw.costIntervalStart),
+    },
+  };
+  return summary;
+}
+
+function pendingGcpSummary(
+  table: string,
+  nowMs: number,
+  budgetEvents: GcpBudgetPubsubEventSummary,
+): GcpBillingSummary {
+  return {
+    object: "gcp.billing.usage",
+    source: "bigquery-export-pending",
+    table,
+    capturedAt: new Date(nowMs).toISOString(),
+    ageSeconds: 0,
+    currency: "USD",
+    totals: { today: 0, last7d: 0, monthToDate: 0 },
+    netTotals: { today: 0, last7d: 0, monthToDate: 0 },
+    creditTotals: { today: 0, last7d: 0, monthToDate: 0 },
+    topServices: { last7d: [], monthToDate: [] },
+    daily: [],
+    budgetEvents,
+  };
+}
+
+function applyBudgetSnapshotFallback(
+  summary: GcpBillingSummary,
+  budgetEvents: GcpBudgetPubsubEventSummary,
+  nowMs: number,
+): GcpBillingSummary {
+  if (summary.totals.today > 0 || summary.totals.last7d > 0 || summary.totals.monthToDate > 0) {
+    return summary;
+  }
+
+  const rawCost = budgetEvents.payload.costAmount;
+  if (typeof rawCost !== "number" || !Number.isFinite(rawCost) || rawCost <= 0) {
+    return summary;
+  }
+
+  const cost = Math.max(0, rawCost);
+  const today = dayUtc(nowMs);
+  const sevenDaysAgo = dayUtc(nowMs - 6 * 24 * 60 * 60 * 1000);
+  const startDayRaw = budgetEvents.payload.costIntervalStart?.slice(0, 10) ?? "";
+  const startDay = /^\d{4}-\d{2}-\d{2}$/.test(startDayRaw) ? startDayRaw : null;
+  const inferredToday = startDay === today ? cost : 0;
+  const inferredLast7d = startDay && startDay >= sevenDaysAgo ? cost : 0;
+  const currency = budgetEvents.payload.currencyCode ?? summary.currency;
+
+  return {
+    ...summary,
+    source: `${summary.source}+budget-snapshot`,
+    currency,
+    totals: {
+      today: inferredToday,
+      last7d: inferredLast7d,
+      monthToDate: cost,
+    },
+    netTotals: {
+      today: inferredToday,
+      last7d: inferredLast7d,
+      monthToDate: cost,
+    },
+    fallback: {
+      kind: "budget_snapshot",
+      note: "Using budget snapshot fallback until billing export rows arrive.",
+    },
+  };
+}
+
+function parseBillingTableParts(table: string): { projectId: string; datasetId: string; tableId: string } {
+  const [projectId, datasetId, tableId] = table.split(".", 3);
+  if (!projectId || !datasetId || !tableId) {
+    throw new Error("Invalid GCP_BILLING_EXPORT_TABLE format.");
+  }
+  return { projectId, datasetId, tableId };
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(() => resolve(), ms);
+  });
+}
+
+function readGcpAdcCredentials(raw: string): GcpAdcCredentials {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const clientId = maybeString(parsed.client_id);
+  const clientSecret = maybeString(parsed.client_secret);
+  const refreshToken = maybeString(parsed.refresh_token);
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(`ADC file at ${GCP_BILLING_ADC_PATH} is missing client_id/client_secret/refresh_token.`);
+  }
+  return { clientId, clientSecret, refreshToken };
+}
+
+async function getGcpAccessToken(): Promise<string> {
+  const nowMs = Date.now();
+  if (cachedGcpAccessToken && nowMs < cachedGcpAccessToken.expiresAtMs) {
+    return cachedGcpAccessToken.token;
+  }
+
+  const raw = await fs.readFile(GCP_BILLING_ADC_PATH, "utf8");
+  const creds = readGcpAdcCredentials(raw);
+  const form = new URLSearchParams({
+    client_id: creds.clientId,
+    client_secret: creds.clientSecret,
+    refresh_token: creds.refreshToken,
+    grant_type: "refresh_token",
+  });
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+    signal: AbortSignal.timeout(20_000),
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(`GCP OAuth refresh failed (HTTP ${response.status}).`);
+  }
+
+  const token = maybeString(payload.access_token);
+  if (!token) {
+    throw new Error("GCP OAuth refresh succeeded without access_token.");
+  }
+
+  const expiresInSec = maybeNumber(payload.expires_in) ?? 3600;
+  const validForMs = Math.max(60, expiresInSec - 60) * 1000;
+  cachedGcpAccessToken = { token, expiresAtMs: nowMs + validForMs };
+  return token;
+}
+
+function isBigQueryTableNotFound(status: number, body: unknown): boolean {
+  if (status === 404) return true;
+  if (!body || typeof body !== "object") return false;
+  const root = body as BigQueryQueryResponse;
+  const message = maybeString(root.error?.message)?.toLowerCase() ?? "";
+  if (message.includes("not found: table")) return true;
+  const reasons = Array.isArray(root.error?.errors) ? root.error?.errors : [];
+  return reasons.some((item) => item.reason?.toLowerCase() === "notfound");
+}
+
+function parseBigQueryRows(rows: unknown[]): BillingRow[] {
+  return rows.map((item) => {
+    const raw = (item && typeof item === "object" ? item : {}) as BigQueryRow;
+    const fields = Array.isArray(raw.f) ? raw.f : [];
+    const day = fields[0]?.v;
+    const service = fields[1]?.v;
+    const grossCost = fields[2]?.v;
+    const credits = fields[3]?.v;
+    const netCost = fields[4]?.v;
+    const currency = fields[5]?.v;
+    return {
+      day: typeof day === "string" ? day : undefined,
+      service: typeof service === "string" ? service : undefined,
+      grossCost: typeof grossCost === "string" || typeof grossCost === "number" ? grossCost : undefined,
+      credits: typeof credits === "string" || typeof credits === "number" ? credits : undefined,
+      netCost: typeof netCost === "string" || typeof netCost === "number" ? netCost : undefined,
+      currency: typeof currency === "string" ? currency : undefined,
+    };
+  });
+}
+
+async function runBigQuerySql(
+  table: string,
+  sql: string,
+): Promise<{ rows: BillingRow[]; notFound: boolean }> {
+  const { projectId } = parseBillingTableParts(table);
+  const quotaProject = GCP_BILLING_QUOTA_PROJECT || projectId;
+  const token = await getGcpAccessToken();
+  const baseUrl = `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}`;
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "X-Goog-User-Project": quotaProject,
+  };
+
+  const queryResponse = await fetch(`${baseUrl}/queries`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      query: sql,
+      useLegacySql: false,
+      timeoutMs: 45_000,
+      maxResults: 10_000,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  const queryBody = (await queryResponse.json().catch(() => ({}))) as BigQueryQueryResponse;
+  if (!queryResponse.ok) {
+    if (isBigQueryTableNotFound(queryResponse.status, queryBody)) {
+      return { rows: [], notFound: true };
+    }
+    throw new Error(`BigQuery query failed (HTTP ${queryResponse.status}).`);
+  }
+  if (isBigQueryTableNotFound(queryResponse.status, queryBody)) {
+    return { rows: [], notFound: true };
+  }
+
+  let current = queryBody;
+  const allRows: BillingRow[] = parseBigQueryRows(Array.isArray(current.rows) ? current.rows : []);
+
+  let pollsRemaining = 30;
+  while (current.jobComplete === false && pollsRemaining > 0) {
+    const jobId = current.jobReference?.jobId;
+    if (!jobId) {
+      throw new Error("BigQuery query did not provide jobReference.jobId.");
+    }
+    const params = new URLSearchParams({ maxResults: "10000" });
+    if (current.jobReference?.location) params.set("location", current.jobReference.location);
+    await sleep(1_000);
+    const pollResponse = await fetch(`${baseUrl}/queries/${encodeURIComponent(jobId)}?${params.toString()}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "X-Goog-User-Project": quotaProject,
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    const pollBody = (await pollResponse.json().catch(() => ({}))) as BigQueryQueryResponse;
+    if (!pollResponse.ok) {
+      throw new Error(`BigQuery getQueryResults failed (HTTP ${pollResponse.status}).`);
+    }
+    current = pollBody;
+    allRows.push(...parseBigQueryRows(Array.isArray(current.rows) ? current.rows : []));
+    pollsRemaining -= 1;
+  }
+  if (current.jobComplete === false) {
+    throw new Error("BigQuery query timed out waiting for results.");
+  }
+
+  let nextPageToken = current.pageToken;
+  while (nextPageToken) {
+    const jobId = current.jobReference?.jobId;
+    if (!jobId) {
+      throw new Error("BigQuery pagination missing jobReference.jobId.");
+    }
+    const params = new URLSearchParams({
+      maxResults: "10000",
+      pageToken: nextPageToken,
+    });
+    if (current.jobReference?.location) params.set("location", current.jobReference.location);
+    const pageResponse = await fetch(`${baseUrl}/queries/${encodeURIComponent(jobId)}?${params.toString()}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "X-Goog-User-Project": quotaProject,
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    const pageBody = (await pageResponse.json().catch(() => ({}))) as BigQueryQueryResponse;
+    if (!pageResponse.ok) {
+      throw new Error(`BigQuery pagination failed (HTTP ${pageResponse.status}).`);
+    }
+    allRows.push(...parseBigQueryRows(Array.isArray(pageBody.rows) ? pageBody.rows : []));
+    current = pageBody;
+    nextPageToken = pageBody.pageToken;
+  }
+
+  return { rows: allRows, notFound: false };
 }
 
 export async function getCodexStatusSummary(refresh = false, accountId?: string): Promise<CodexStatusSummary> {
@@ -502,6 +910,7 @@ export async function getGcpBillingSummary(refresh = false): Promise<GcpBillingS
   }
 
   const table = assertBillingTable(GCP_BILLING_EXPORT_TABLE);
+  const budgetEvents = await readBudgetPubsubEventSummary();
   const lookback = Number.isFinite(GCP_BILLING_LOOKBACK_DAYS)
     ? Math.max(7, Math.min(120, GCP_BILLING_LOOKBACK_DAYS))
     : 45;
@@ -514,87 +923,45 @@ export async function getGcpBillingSummary(refresh = false): Promise<GcpBillingS
 SELECT
   CAST(DATE(usage_start_time) AS STRING) AS day,
   IFNULL(service.description, 'Unknown') AS service,
-  ROUND(SUM(cost), 6) AS cost,
+  ROUND(SUM(cost), 6) AS gross_cost,
+  ROUND(SUM((SELECT IFNULL(SUM(c.amount), 0) FROM UNNEST(credits) AS c)), 6) AS credits,
+  ROUND(SUM(cost) + SUM((SELECT IFNULL(SUM(c.amount), 0) FROM UNNEST(credits) AS c)), 6) AS net_cost,
   ANY_VALUE(currency) AS currency
 FROM \`${table}\`
 WHERE ${whereParts.join(" AND ")}
 GROUP BY day, service
-ORDER BY day DESC, cost DESC
-`.trim();
+ORDER BY day DESC, gross_cost DESC
+	`.trim();
 
-  try {
-    await execFileAsync("bq", ["show", table], { timeout: 15_000, maxBuffer: 512 * 1024 });
-  } catch {
-    const pending: GcpBillingSummary = {
-      object: "gcp.billing.usage",
-      source: "bigquery-export-pending",
-      table,
-      capturedAt: new Date(nowMs).toISOString(),
-      ageSeconds: 0,
-      currency: "USD",
-      totals: { today: 0, last7d: 0, monthToDate: 0 },
-      topServices: { last7d: [], monthToDate: [] },
-      daily: [],
-    };
-    cachedGcpSummary = { atMs: nowMs, data: pending };
-    return pending;
+  const result = await runBigQuerySql(table, sql);
+  if (result.notFound) {
+    const pending = pendingGcpSummary(table, nowMs, budgetEvents);
+    const summary = applyBudgetSnapshotFallback(pending, budgetEvents, nowMs);
+    cachedGcpSummary = { atMs: nowMs, data: summary };
+    return summary;
   }
-
-  let stdout = "";
-  let stderr = "";
-  try {
-    const result = await execFileAsync("bq", ["query", "--format=json", "--nouse_legacy_sql", sql], {
-      timeout: 60_000,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    stdout = result.stdout;
-    stderr = result.stderr ?? "";
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const lowered = message.toLowerCase();
-    if (lowered.includes("not found: table")) {
-      const pending: GcpBillingSummary = {
-        object: "gcp.billing.usage",
-        source: "bigquery-export-pending",
-        table,
-        capturedAt: new Date(nowMs).toISOString(),
-        ageSeconds: 0,
-        currency: "USD",
-        totals: { today: 0, last7d: 0, monthToDate: 0 },
-        topServices: { last7d: [], monthToDate: [] },
-        daily: [],
-      };
-      cachedGcpSummary = { atMs: nowMs, data: pending };
-      return pending;
-    }
-    throw error;
-  }
-
-  if (stderr?.trim()) {
-    const lowered = stderr.toLowerCase();
-    if (lowered.includes("error")) {
-      throw new Error(`bq query failed: ${stderr.trim()}`);
-    }
-  }
-
-  let rawRows: BillingRow[] = [];
-  try {
-    rawRows = JSON.parse(stdout) as BillingRow[];
-  } catch {
-    throw new Error("Failed to parse bq query output as JSON.");
-  }
+  const rawRows = result.rows;
 
   const rows = rawRows
     .map((row) => {
       const day = typeof row.day === "string" ? row.day : "";
       const service = typeof row.service === "string" ? row.service : "Unknown";
-      const costNum =
-        typeof row.cost === "number" ? row.cost : typeof row.cost === "string" ? Number(row.cost) : NaN;
+      const grossCostNum =
+        typeof row.grossCost === "number" ? row.grossCost : typeof row.grossCost === "string" ? Number(row.grossCost) : NaN;
+      const creditsNum =
+        typeof row.credits === "number" ? row.credits : typeof row.credits === "string" ? Number(row.credits) : NaN;
+      const netCostNum =
+        typeof row.netCost === "number" ? row.netCost : typeof row.netCost === "string" ? Number(row.netCost) : NaN;
       const currency = typeof row.currency === "string" && row.currency ? row.currency : "USD";
+      const grossCost = Number.isFinite(grossCostNum) ? grossCostNum : 0;
+      const credits = Number.isFinite(creditsNum) ? creditsNum : 0;
+      const netCost = Number.isFinite(netCostNum) ? netCostNum : grossCost + credits;
       return {
         day,
         service,
-        cost: Number.isFinite(costNum) ? costNum : 0,
+        grossCost,
+        credits,
+        netCost,
         currency,
       };
     })
@@ -602,12 +969,16 @@ ORDER BY day DESC, cost DESC
 
   const currency = rows[0]?.currency ?? "USD";
 
-  const dailyMap = new Map<string, number>();
+  const dailyMap = new Map<string, { grossCost: number; credits: number; netCost: number }>();
   for (const row of rows) {
-    dailyMap.set(row.day, (dailyMap.get(row.day) ?? 0) + row.cost);
+    const curr = dailyMap.get(row.day) ?? { grossCost: 0, credits: 0, netCost: 0 };
+    curr.grossCost += row.grossCost;
+    curr.credits += row.credits;
+    curr.netCost += row.netCost;
+    dailyMap.set(row.day, curr);
   }
   const daily = [...dailyMap.entries()]
-    .map(([day, cost]) => ({ day, cost }))
+    .map(([day, values]) => ({ day, ...values }))
     .sort((a, b) => b.day.localeCompare(a.day))
     .slice(0, 45);
 
@@ -623,19 +994,31 @@ ORDER BY day DESC, cost DESC
     ageSeconds: 0,
     currency,
     totals: {
-      today: sumRange(daily, today, today),
-      last7d: sumRange(daily, sevenDaysAgo, today),
-      monthToDate: sumRange(daily, monthStart, today),
+      today: sumRange(daily, today, today, "grossCost"),
+      last7d: sumRange(daily, sevenDaysAgo, today, "grossCost"),
+      monthToDate: sumRange(daily, monthStart, today, "grossCost"),
+    },
+    netTotals: {
+      today: sumRange(daily, today, today, "netCost"),
+      last7d: sumRange(daily, sevenDaysAgo, today, "netCost"),
+      monthToDate: sumRange(daily, monthStart, today, "netCost"),
+    },
+    creditTotals: {
+      today: sumRange(daily, today, today, "credits"),
+      last7d: sumRange(daily, sevenDaysAgo, today, "credits"),
+      monthToDate: sumRange(daily, monthStart, today, "credits"),
     },
     topServices: {
       last7d: topServicesInRange(rows, sevenDaysAgo, today, 6),
       monthToDate: topServicesInRange(rows, monthStart, today, 6),
     },
     daily,
+    budgetEvents,
   };
 
-  cachedGcpSummary = { atMs: nowMs, data: summary };
-  return summary;
+  const finalSummary = applyBudgetSnapshotFallback(summary, budgetEvents, nowMs);
+  cachedGcpSummary = { atMs: nowMs, data: finalSummary };
+  return finalSummary;
 }
 
 export async function getCodexUsageSummary(nowMs = Date.now()): Promise<CodexUsageSummary> {

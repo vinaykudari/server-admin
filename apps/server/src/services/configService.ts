@@ -4,12 +4,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { credentialStorePath, managedEnvPath } from "../utils/paths.js";
+import { credentialStorePath, managedEnvPath, sharedEnvMirrorPath } from "../utils/paths.js";
 
 const execFileAsync = promisify(execFile);
 
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 const OPENCLAW_USER = process.env.OPENCLAW_USER ?? "openclaw";
+const OPENCLAW_HOME_PREFIX = "/home/openclaw/";
 
 export class ValidationError extends Error {}
 
@@ -162,13 +163,17 @@ async function resolveOpenclawIds(): Promise<{ uid: number; gid: number } | null
 }
 
 async function securePathForOpenclaw(targetPath: string, mode: number): Promise<void> {
-  try {
-    const ids = await resolveOpenclawIds();
-    if (ids && process.geteuid?.() === 0) {
-      await fs.chown(targetPath, ids.uid, ids.gid);
+  const shouldUseOpenclawOwnership = targetPath.startsWith(OPENCLAW_HOME_PREFIX);
+
+  if (shouldUseOpenclawOwnership) {
+    try {
+      const ids = await resolveOpenclawIds();
+      if (ids && process.geteuid?.() === 0) {
+        await fs.chown(targetPath, ids.uid, ids.gid);
+      }
+    } catch {
+      // Best effort only; do not fail data operations on ownership issues.
     }
-  } catch {
-    // Best effort only; do not fail data operations on ownership issues.
   }
 
   try {
@@ -181,7 +186,9 @@ async function securePathForOpenclaw(targetPath: string, mode: number): Promise<
 async function ensureParentDir(filePath: string): Promise<void> {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true });
-  await securePathForOpenclaw(dir, 0o750);
+  if (dir.startsWith(OPENCLAW_HOME_PREFIX)) {
+    await securePathForOpenclaw(dir, 0o750);
+  }
 }
 
 async function atomicWrite(filePath: string, data: string): Promise<void> {
@@ -225,9 +232,7 @@ async function ensureEnvFile(): Promise<void> {
   }
 }
 
-async function readEnvMap(): Promise<Map<string, string>> {
-  await ensureEnvFile();
-  const content = await fs.readFile(managedEnvPath, "utf8");
+function parseEnvContent(content: string): Map<string, string> {
   const map = new Map<string, string>();
 
   for (const line of content.split(/\r?\n/)) {
@@ -247,9 +252,58 @@ async function readEnvMap(): Promise<Map<string, string>> {
   return map;
 }
 
-async function writeEnvMap(map: Map<string, string>): Promise<void> {
+function serializeEnvMap(map: Map<string, string>): string {
   const lines = Array.from(map.entries()).map(([key, value]) => `${key}=${encodeEnvValue(value)}`);
-  await atomicWrite(managedEnvPath, lines.join("\n") + (lines.length > 0 ? "\n" : ""));
+  return lines.join("\n") + (lines.length > 0 ? "\n" : "");
+}
+
+async function readEnvMapFromPath(filePath: string, ensureFile = false): Promise<Map<string, string>> {
+  if (ensureFile) {
+    try {
+      await fs.access(filePath);
+    } catch {
+      await atomicWrite(filePath, "");
+    }
+  }
+
+  try {
+    const content = await fs.readFile(filePath, "utf8");
+    return parseEnvContent(content);
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
+async function writeEnvMapToPath(filePath: string, map: Map<string, string>): Promise<void> {
+  await atomicWrite(filePath, serializeEnvMap(map));
+}
+
+async function readVmEnvMap(): Promise<Map<string, string>> {
+  await ensureEnvFile();
+  return readEnvMapFromPath(managedEnvPath, false);
+}
+
+async function writeVmEnvMap(map: Map<string, string>): Promise<void> {
+  await writeEnvMapToPath(managedEnvPath, map);
+}
+
+async function syncSharedEnvMirror(vmEnvMap: Map<string, string>): Promise<void> {
+  if (sharedEnvMirrorPath === managedEnvPath) return;
+  try {
+    await writeEnvMapToPath(sharedEnvMirrorPath, vmEnvMap);
+  } catch {
+    // Best effort only; mirror sync should not block VM env operations.
+  }
+}
+
+function readRuntimeEnvMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!ENV_KEY_PATTERN.test(key)) continue;
+    if (typeof value !== "string") continue;
+    map.set(key, value);
+  }
+  return map;
 }
 
 function sortEnvEntries(entries: EnvVarEntry[]): EnvVarEntry[] {
@@ -345,29 +399,43 @@ function sortCredentialEntries(entries: CredentialEntry[]): CredentialEntry[] {
 
 export async function initializeManagedConfigFiles(): Promise<void> {
   await ensureEnvFile();
+  const vmEnvMap = await readVmEnvMap();
+  await syncSharedEnvMirror(vmEnvMap);
   await ensureCredentialStoreFile();
 }
 
 export async function listManagedEnv(): Promise<{ path: string; entries: EnvVarEntry[] }> {
-  const envMap = await readEnvMap();
-  const entries = sortEnvEntries(Array.from(envMap.entries()).map(([key, value]) => ({ key, value })));
-  return { path: managedEnvPath, entries };
+  const vmEnvMap = await readVmEnvMap();
+  const runtimeEnvMap = readRuntimeEnvMap();
+  const mergedMap = new Map<string, string>(runtimeEnvMap);
+  for (const [key, value] of vmEnvMap.entries()) {
+    if (!mergedMap.has(key)) {
+      mergedMap.set(key, value);
+    }
+  }
+  await syncSharedEnvMirror(vmEnvMap);
+  const entries = sortEnvEntries(Array.from(mergedMap.entries()).map(([key, value]) => ({ key, value })));
+  return { path: `${managedEnvPath} + process.env`, entries };
 }
 
 export async function upsertManagedEnv(keyRaw: string, valueRaw: string): Promise<EnvVarEntry> {
   const key = assertValidKey(keyRaw);
   const value = String(valueRaw ?? "");
-  const envMap = await readEnvMap();
+  const envMap = await readVmEnvMap();
   envMap.set(key, value);
-  await writeEnvMap(envMap);
+  await writeVmEnvMap(envMap);
+  await syncSharedEnvMirror(envMap);
+  process.env[key] = value;
   return { key, value };
 }
 
 export async function removeManagedEnv(keyRaw: string): Promise<void> {
   const key = assertValidKey(keyRaw);
-  const envMap = await readEnvMap();
+  const envMap = await readVmEnvMap();
   envMap.delete(key);
-  await writeEnvMap(envMap);
+  await writeVmEnvMap(envMap);
+  await syncSharedEnvMirror(envMap);
+  delete process.env[key];
 }
 
 export async function listCredentials(): Promise<{ path: string; entries: CredentialEntry[] }> {

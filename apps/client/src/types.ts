@@ -160,12 +160,44 @@ export type CodexAccountsPayload = {
 
 export type GcpBillingServiceCost = {
   service: string;
-  cost: number;
+  grossCost: number;
+  credits: number;
+  netCost: number;
 };
 
 export type GcpBillingDailyCost = {
   day: string;
-  cost: number;
+  grossCost: number;
+  credits: number;
+  netCost: number;
+};
+
+export type GcpBillingTotals = {
+  today: number;
+  last7d: number;
+  monthToDate: number;
+};
+
+export type GcpBudgetPubsubEventPayload = {
+  budgetDisplayName: string | null;
+  costAmount: number | null;
+  budgetAmount: number | null;
+  alertThresholdExceeded: number | null;
+  currencyCode: string | null;
+  costIntervalStart: string | null;
+};
+
+export type GcpBudgetPubsubEventSummary = {
+  source: "gcp-budget-pubsub-watch";
+  statePath: string;
+  available: boolean;
+  lastCheckedAt: string | null;
+  lastPublishTime: string | null;
+  lastMessageId: string | null;
+  pulledCount: number;
+  ackedCount: number;
+  lastNotified: boolean;
+  payload: GcpBudgetPubsubEventPayload;
 };
 
 export type GcpBillingPayload = {
@@ -175,16 +207,19 @@ export type GcpBillingPayload = {
   capturedAt: string;
   ageSeconds: number;
   currency: string;
-  totals: {
-    today: number;
-    last7d: number;
-    monthToDate: number;
-  };
+  totals: GcpBillingTotals;
+  netTotals: GcpBillingTotals;
+  creditTotals: GcpBillingTotals;
   topServices: {
     last7d: GcpBillingServiceCost[];
     monthToDate: GcpBillingServiceCost[];
   };
   daily: GcpBillingDailyCost[];
+  budgetEvents: GcpBudgetPubsubEventSummary;
+  fallback?: {
+    kind: "budget_snapshot";
+    note: string;
+  };
 };
 
 export type EnvVarEntry = {
