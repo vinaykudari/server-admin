@@ -95,6 +95,46 @@ export type CodexUsagePayload = {
   warning?: string;
 };
 
+export type CodexSourceCategory = "api" | "openclaw" | "cli-codex" | "other";
+
+export type CodexSourceUsageTotals = {
+  requests: number;
+  successes: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
+export type CodexSourceUsageCategory = CodexSourceUsageTotals & {
+  category: CodexSourceCategory;
+  label: string;
+  accountCount: number;
+  sourceCount: number;
+  successRate: number;
+  percentOfTotal: number;
+};
+
+export type CodexSourceUsageRow = CodexSourceUsageTotals & {
+  accountId: string;
+  source: string;
+  category: CodexSourceCategory;
+  successRate: number;
+};
+
+export type CodexSourceUsagePayload = {
+  object: "codex.source.usage";
+  source: "codex-multi-router-db";
+  dbPath: string;
+  lookbackHours: number;
+  since: string;
+  capturedAt: string;
+  totals: CodexSourceUsageTotals;
+  categories: CodexSourceUsageCategory[];
+  rows: CodexSourceUsageRow[];
+  warning?: string;
+};
+
 export type CodexStatusLimit = {
   usedPercent: number | null;
   windowMinutes: number | null;
@@ -217,7 +257,7 @@ export type GcpBillingPayload = {
   daily: GcpBillingDailyCost[];
   budgetEvents: GcpBudgetPubsubEventSummary;
   fallback?: {
-    kind: "budget_snapshot";
+    kind: "budget_snapshot" | "export_empty";
     note: string;
   };
 };
@@ -263,4 +303,24 @@ export type AgentSessionLogPayload = {
   sessionId: string;
   path: string;
   lines: string[];
+};
+
+export type ManagedAppKind = "systemd" | "docker";
+
+export type ManagedApp = {
+  id: string;
+  name: string;
+  kind: ManagedAppKind;
+  target: string;
+  running: boolean;
+  onBoot: boolean;
+  available: boolean;
+  statusDetail: string;
+  bootDetail: string;
+  memoryBytes: number | null;
+  memoryLabel: string;
+};
+
+export type ManagedAppsPayload = {
+  apps: ManagedApp[];
 };

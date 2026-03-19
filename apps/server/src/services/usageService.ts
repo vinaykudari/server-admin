@@ -34,6 +34,46 @@ export type CodexUsageSummary = {
   warning?: string;
 };
 
+type CodexSourceUsageTotals = {
+  requests: number;
+  successes: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
+export type CodexSourceCategory = "api" | "openclaw" | "cli-codex" | "other";
+
+export type CodexSourceUsageCategorySummary = CodexSourceUsageTotals & {
+  category: CodexSourceCategory;
+  label: string;
+  accountCount: number;
+  sourceCount: number;
+  successRate: number;
+  percentOfTotal: number;
+};
+
+export type CodexSourceUsageRow = CodexSourceUsageTotals & {
+  accountId: string;
+  source: string;
+  category: CodexSourceCategory;
+  successRate: number;
+};
+
+export type CodexSourceUsageSummary = {
+  object: "codex.source.usage";
+  source: "codex-multi-router-db";
+  dbPath: string;
+  lookbackHours: number;
+  since: string;
+  capturedAt: string;
+  totals: CodexSourceUsageTotals;
+  categories: CodexSourceUsageCategorySummary[];
+  rows: CodexSourceUsageRow[];
+  warning?: string;
+};
+
 export type CodexStatusLimit = {
   usedPercent: number | null;
   windowMinutes: number | null;
@@ -152,7 +192,7 @@ export type GcpBillingSummary = {
   daily: GcpBillingDailyCost[];
   budgetEvents: GcpBudgetPubsubEventSummary;
   fallback?: {
-    kind: "budget_snapshot";
+    kind: "budget_snapshot" | "export_empty";
     note: string;
   };
 };
@@ -162,6 +202,8 @@ const CODEX_STATUS_URL =
 const CODEX_ROUTER_ACCOUNTS_URL =
   process.env.CODEX_ROUTER_ACCOUNTS_URL?.trim() || "https://server.vinaykudari.com/codex/v1/router/accounts";
 const CODEX_API_DOTENV_PATH = process.env.CODEX_API_DOTENV_PATH?.trim() || "/srv/apps/codex-openai-api/.env";
+const CODEX_ROUTER_STATE_DB_PATH =
+  process.env.CODEX_ROUTER_STATE_DB_PATH?.trim() || "/srv/apps/codex-multi-router/state/router.db";
 const GCP_BILLING_EXPORT_TABLE = process.env.GCP_BILLING_EXPORT_TABLE?.trim() ?? "";
 const GCP_BILLING_ACCOUNT_ID = process.env.GCP_BILLING_ACCOUNT_ID?.trim() ?? "";
 const GCP_BILLING_PROJECT_ID = process.env.GCP_BILLING_PROJECT_ID?.trim() ?? "";
@@ -223,6 +265,116 @@ function parseTimestampFromName(name: string): number | null {
 
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function emptySourceTotals(): CodexSourceUsageTotals {
+  return {
+    requests: 0,
+    successes: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function addSourceTotals(target: CodexSourceUsageTotals, value: CodexSourceUsageTotals): void {
+  target.requests += value.requests;
+  target.successes += value.successes;
+  target.inputTokens += value.inputTokens;
+  target.cachedInputTokens += value.cachedInputTokens;
+  target.outputTokens += value.outputTokens;
+  target.totalTokens += value.totalTokens;
+}
+
+function classifySourceCategory(rawSource: string): CodexSourceCategory {
+  const source = rawSource.trim().toLowerCase();
+  if (!source) return "other";
+  if (source.startsWith("openclaw")) return "openclaw";
+  if (source.startsWith("api") || source.startsWith("app-server-gateway")) return "api";
+  if (source.startsWith("cli")) return "cli-codex";
+  return "other";
+}
+
+function sourceCategoryLabel(category: CodexSourceCategory): string {
+  if (category === "api") return "API";
+  if (category === "openclaw") return "OpenClaw";
+  if (category === "cli-codex") return "CLI Codex";
+  return "Other";
+}
+
+type RouterUsageSqlRow = {
+  accountId: string;
+  source: string;
+  requests: number;
+  successes: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
+const ROUTER_USAGE_SQL_SCRIPT = `
+import json
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+since = sys.argv[2]
+
+conn = sqlite3.connect(db_path)
+conn.row_factory = sqlite3.Row
+try:
+    rows = conn.execute(
+        """
+        SELECT
+            account_id AS account_id,
+            source AS source,
+            COUNT(*) AS requests,
+            COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0) AS successes,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens,
+            COALESCE(SUM(total_tokens), 0) AS total_tokens
+        FROM invocation_events
+        WHERE created_at >= ?
+        GROUP BY account_id, source
+        ORDER BY total_tokens DESC, requests DESC
+        """,
+        (since,),
+    ).fetchall()
+    payload = [dict(row) for row in rows]
+finally:
+    conn.close()
+
+print(json.dumps(payload, separators=(",", ":")))
+`.trim();
+
+async function queryRouterUsageRows(dbPath: string, sinceIso: string): Promise<RouterUsageSqlRow[]> {
+  const { stdout } = await execFileAsync("python3", ["-c", ROUTER_USAGE_SQL_SCRIPT, dbPath, sinceIso], {
+    timeout: 10_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+
+  const parsed = JSON.parse(stdout) as unknown;
+  const rows = Array.isArray(parsed) ? parsed : [];
+  const output: RouterUsageSqlRow[] = [];
+
+  for (const item of rows) {
+    const row = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    output.push({
+      accountId: maybeString(row.account_id) ?? "unknown",
+      source: maybeString(row.source) ?? "unknown",
+      requests: maybeNumber(row.requests) ?? 0,
+      successes: maybeNumber(row.successes) ?? 0,
+      inputTokens: maybeNumber(row.input_tokens) ?? 0,
+      cachedInputTokens: maybeNumber(row.cached_input_tokens) ?? 0,
+      outputTokens: maybeNumber(row.output_tokens) ?? 0,
+      totalTokens: maybeNumber(row.total_tokens) ?? 0,
+    });
+  }
+
+  return output;
 }
 
 async function readTurnUsage(filePath: string): Promise<TurnCompletedUsage | null> {
@@ -627,6 +779,25 @@ function applyBudgetSnapshotFallback(
   };
 }
 
+function applyEmptyExportFallback(summary: GcpBillingSummary): GcpBillingSummary {
+  const hasData =
+    summary.totals.today > 0 ||
+    summary.totals.last7d > 0 ||
+    summary.totals.monthToDate > 0 ||
+    summary.daily.length > 0;
+  if (hasData) return summary;
+  if (summary.fallback?.kind === "budget_snapshot") return summary;
+
+  return {
+    ...summary,
+    source: summary.source === "bigquery-export" ? "bigquery-export-empty" : `${summary.source}+empty`,
+    fallback: {
+      kind: "export_empty",
+      note: "Billing export table is configured but has no rows yet. Budget Pub/Sub fallback will populate after the first threshold notification.",
+    },
+  };
+}
+
 function parseBillingTableParts(table: string): { projectId: string; datasetId: string; tableId: string } {
   const [projectId, datasetId, tableId] = table.split(".", 3);
   if (!projectId || !datasetId || !tableId) {
@@ -900,6 +1071,147 @@ export async function getCodexAccountsSummary(refresh = false): Promise<CodexAcc
   return parseCodexAccountsPayload(body);
 }
 
+export async function getCodexSourceUsageSummary(lookbackHours = 24): Promise<CodexSourceUsageSummary> {
+  const nowMs = Date.now();
+  const boundedLookback = Number.isFinite(lookbackHours)
+    ? Math.max(1, Math.min(24 * 30, Math.floor(lookbackHours)))
+    : 24;
+  const sinceIso = new Date(nowMs - boundedLookback * 60 * 60 * 1000).toISOString();
+  const capturedAt = new Date(nowMs).toISOString();
+
+  let rowsRaw: RouterUsageSqlRow[];
+  try {
+    rowsRaw = await queryRouterUsageRows(CODEX_ROUTER_STATE_DB_PATH, sinceIso);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      object: "codex.source.usage",
+      source: "codex-multi-router-db",
+      dbPath: CODEX_ROUTER_STATE_DB_PATH,
+      lookbackHours: boundedLookback,
+      since: sinceIso,
+      capturedAt,
+      totals: emptySourceTotals(),
+      categories: [
+        {
+          category: "api",
+          label: sourceCategoryLabel("api"),
+          ...emptySourceTotals(),
+          accountCount: 0,
+          sourceCount: 0,
+          successRate: 0,
+          percentOfTotal: 0,
+        },
+        {
+          category: "openclaw",
+          label: sourceCategoryLabel("openclaw"),
+          ...emptySourceTotals(),
+          accountCount: 0,
+          sourceCount: 0,
+          successRate: 0,
+          percentOfTotal: 0,
+        },
+        {
+          category: "cli-codex",
+          label: sourceCategoryLabel("cli-codex"),
+          ...emptySourceTotals(),
+          accountCount: 0,
+          sourceCount: 0,
+          successRate: 0,
+          percentOfTotal: 0,
+        },
+        {
+          category: "other",
+          label: sourceCategoryLabel("other"),
+          ...emptySourceTotals(),
+          accountCount: 0,
+          sourceCount: 0,
+          successRate: 0,
+          percentOfTotal: 0,
+        },
+      ],
+      rows: [],
+      warning: `Codex source analytics unavailable: ${message}`,
+    };
+  }
+
+  const rows: CodexSourceUsageRow[] = rowsRaw.map((row) => {
+    const requests = Math.max(0, row.requests);
+    const successes = Math.max(0, row.successes);
+    return {
+      accountId: row.accountId,
+      source: row.source,
+      category: classifySourceCategory(row.source),
+      requests,
+      successes,
+      inputTokens: Math.max(0, row.inputTokens),
+      cachedInputTokens: Math.max(0, row.cachedInputTokens),
+      outputTokens: Math.max(0, row.outputTokens),
+      totalTokens: Math.max(0, row.totalTokens),
+      successRate: requests > 0 ? successes / requests : 0,
+    };
+  });
+  rows.sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests || a.source.localeCompare(b.source));
+
+  const totals = emptySourceTotals();
+  for (const row of rows) {
+    addSourceTotals(totals, row);
+  }
+
+  const categoriesSeed: CodexSourceCategory[] = ["api", "openclaw", "cli-codex", "other"];
+  const categoryMap = new Map<
+    CodexSourceCategory,
+    {
+      totals: CodexSourceUsageTotals;
+      accounts: Set<string>;
+      sources: Set<string>;
+    }
+  >();
+
+  for (const category of categoriesSeed) {
+    categoryMap.set(category, {
+      totals: emptySourceTotals(),
+      accounts: new Set<string>(),
+      sources: new Set<string>(),
+    });
+  }
+
+  for (const row of rows) {
+    const entry = categoryMap.get(row.category)!;
+    addSourceTotals(entry.totals, row);
+    entry.accounts.add(row.accountId);
+    entry.sources.add(row.source);
+  }
+
+  const categories = [...categoryMap.entries()]
+    .map(([category, entry]) => {
+      const requests = entry.totals.requests;
+      const successes = entry.totals.successes;
+      return {
+        category,
+        label: sourceCategoryLabel(category),
+        ...entry.totals,
+        accountCount: entry.accounts.size,
+        sourceCount: entry.sources.size,
+        successRate: requests > 0 ? successes / requests : 0,
+        percentOfTotal: totals.totalTokens > 0 ? entry.totals.totalTokens / totals.totalTokens : 0,
+      };
+    })
+    .sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests || a.label.localeCompare(b.label));
+
+  return {
+    object: "codex.source.usage",
+    source: "codex-multi-router-db",
+    dbPath: CODEX_ROUTER_STATE_DB_PATH,
+    lookbackHours: boundedLookback,
+    since: sinceIso,
+    capturedAt,
+    totals,
+    categories,
+    rows,
+  };
+}
+
 export async function getGcpBillingSummary(refresh = false): Promise<GcpBillingSummary> {
   const nowMs = Date.now();
   if (!refresh && cachedGcpSummary && nowMs - cachedGcpSummary.atMs < GCP_BILLING_CACHE_MS) {
@@ -1017,8 +1329,9 @@ ORDER BY day DESC, gross_cost DESC
   };
 
   const finalSummary = applyBudgetSnapshotFallback(summary, budgetEvents, nowMs);
-  cachedGcpSummary = { atMs: nowMs, data: finalSummary };
-  return finalSummary;
+  const finalWithEmptyFallback = applyEmptyExportFallback(finalSummary);
+  cachedGcpSummary = { atMs: nowMs, data: finalWithEmptyFallback };
+  return finalWithEmptyFallback;
 }
 
 export async function getCodexUsageSummary(nowMs = Date.now()): Promise<CodexUsageSummary> {

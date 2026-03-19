@@ -1,0 +1,85 @@
+.appsActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.8rem;
+}
+
+.appsTableWrap {
+  overflow-x: auto;
+}
+
+.appsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.appsTable th,
+.appsTable td {
+  text-align: left;
+  padding: 0.6rem 0.55rem;
+  border-bottom: 1px solid rgba(85, 120, 160, 0.2);
+  vertical-align: top;
+}
+
+.appsTable th {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+}
+
+.appsName {
+  font-weight: 600;
+}
+
+.appsTarget {
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.74rem;
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+.appsBadge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.16rem 0.52rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.appsBadge--ok {
+  background: rgba(57, 255, 164, 0.16);
+  color: #8effcb;
+}
+
+.appsBadge--off {
+  background: rgba(255, 110, 110, 0.16);
+  color: #ffb0b0;
+}
+
+.appsDetail {
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.appsButtons {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.appsEmpty {
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  .appsButtons .button {
+    width: 100%;
+  }
+}

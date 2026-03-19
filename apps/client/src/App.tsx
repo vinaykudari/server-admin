@@ -12,6 +12,7 @@ import { JobsPage } from "./components/JobsPage";
 import { CodexUsagePanel } from "./components/CodexUsagePanel";
 import { ConfigPage } from "./components/ConfigPage";
 import { AgentLogsPage } from "./components/AgentLogsPage";
+import { AppsPage } from "./components/AppsPage";
 import { RefreshIcon } from "./components/RefreshIcon";
 import { RunbookRecent } from "./components/RunbookRecent";
 import { useLogs } from "./hooks/useLogs";
@@ -21,11 +22,11 @@ import { useGatewayLog } from "./hooks/useGatewayLog";
 import { useJobOutput } from "./hooks/useJobOutput";
 import { useRecentJobs } from "./hooks/useRecentJobs";
 
-type TabId = "overview" | "jobs" | "live" | "agents" | "config";
+type TabId = "overview" | "jobs" | "live" | "agents" | "config" | "apps";
 const TAB_STORAGE_KEY = "server-admin.active-tab";
 
 const isTabId = (value: string | null): value is TabId =>
-  value === "overview" || value === "jobs" || value === "live" || value === "agents" || value === "config";
+  value === "overview" || value === "jobs" || value === "live" || value === "agents" || value === "config" || value === "apps";
 
 const getInitialTab = (): TabId => {
   if (typeof window === "undefined") return "overview";
@@ -177,6 +178,7 @@ function App() {
       )}
 
       {tab === "config" && <ConfigPage />}
+      {tab === "apps" && <AppsPage />}
       {tab === "agents" && <AgentLogsPage />}
     </div>
   );

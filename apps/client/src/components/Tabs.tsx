@@ -1,6 +1,6 @@
 import "./Tabs.css";
 
-type TabId = "overview" | "jobs" | "live" | "agents" | "config";
+type TabId = "overview" | "jobs" | "live" | "agents" | "config" | "apps";
 
 type Tab = {
   id: TabId;
@@ -19,6 +19,7 @@ const tabs: Tab[] = [
   { id: "live", title: "Live Sessions", label: "L" },
   { id: "agents", title: "Agent Logs", label: "A" },
   { id: "config", title: "Config", label: "C" },
+  { id: "apps", title: "Apps", label: "S" },
 ];
 
 export function Tabs({ active, onChange }: TabsProps) {

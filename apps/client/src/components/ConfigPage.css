@@ -75,6 +75,11 @@
   word-break: break-word;
 }
 
+.configTable--env td[data-label]::before {
+  content: attr(data-label);
+  display: none;
+}
+
 .configEmpty {
   color: var(--muted);
   text-align: center;
@@ -100,5 +105,66 @@
 @media (max-width: 860px) {
   .configForm {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .configTable--env thead {
+    display: none;
+  }
+
+  .configTable--env,
+  .configTable--env tbody,
+  .configTable--env tr,
+  .configTable--env td {
+    display: block;
+    width: 100%;
+  }
+
+  .configTable--env tbody tr {
+    border: 1px solid rgba(85, 120, 160, 0.2);
+    border-radius: 10px;
+    margin-bottom: 0.65rem;
+    padding: 0.2rem 0;
+    background: rgba(8, 16, 26, 0.25);
+  }
+
+  .configTable--env tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .configTable--env td {
+    border-bottom: 0;
+    padding: 0.35rem 0.65rem;
+  }
+
+  .configTable--env td[data-label] {
+    display: grid;
+    grid-template-columns: 4.4rem minmax(0, 1fr);
+    gap: 0.45rem;
+    align-items: start;
+  }
+
+  .configTable--env td[data-label]::before {
+    display: block;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.68rem;
+    line-height: 1.2;
+    padding-top: 0.15rem;
+  }
+
+  .configTable--env td[data-label="Action"] {
+    grid-template-columns: 4.4rem auto;
+  }
+
+  .configTable--env td[data-label] > * {
+    min-width: 0;
+  }
+
+  .configTable--env .button--small {
+    width: fit-content;
+    max-width: 100%;
   }
 }

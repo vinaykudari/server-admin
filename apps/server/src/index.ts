@@ -9,6 +9,7 @@ import jobsRouter from "./routes/jobs.js";
 import usageRouter from "./routes/usage.js";
 import configRouter from "./routes/config.js";
 import agentsRouter from "./routes/agents.js";
+import appsRouter from "./routes/apps.js";
 import { initializeManagedConfigFiles } from "./services/configService.js";
 import { clientDistPath } from "./utils/paths.js";
 
@@ -27,6 +28,7 @@ app.use("/api", jobsRouter);
 app.use("/api", usageRouter);
 app.use("/api", configRouter);
 app.use("/api", agentsRouter);
+app.use("/api", appsRouter);
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "API route not found" });

@@ -189,7 +189,7 @@ export function ConfigPage() {
         </form>
 
         <div className="configTableWrap">
-          <table className="configTable">
+          <table className="configTable configTable--env">
             <thead>
               <tr>
                 <th>Key</th>
@@ -200,13 +200,13 @@ export function ConfigPage() {
             <tbody>
               {(envData?.entries ?? []).map((entry) => (
                 <tr key={entry.key}>
-                  <td>
+                  <td data-label="Key">
                     <code>{entry.key}</code>
                   </td>
-                  <td>
+                  <td data-label="Value">
                     <code>{entry.value || "(empty)"}</code>
                   </td>
-                  <td>
+                  <td data-label="Action">
                     <button className="button button--ghost button--small" onClick={() => void onDeleteEnv(entry.key)}>
                       Delete
                     </button>

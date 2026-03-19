@@ -9,11 +9,14 @@ import type {
   JobOutputRecentPayload,
   LogsPayload,
   CodexAccountsPayload,
+  CodexSourceUsagePayload,
   CodexStatusPayload,
   CodexUsagePayload,
   GcpBillingPayload,
   ManagedCredentialsPayload,
   ManagedEnvPayload,
+  ManagedAppsPayload,
+  ManagedApp,
 } from "../types";
 
 export const fetchLogs = async (): Promise<LogsPayload> => {
@@ -137,6 +140,19 @@ export const fetchCodexAccounts = async (refresh = false): Promise<CodexAccounts
   return response.json() as Promise<CodexAccountsPayload>;
 };
 
+export const fetchCodexSourceUsage = async (refresh = false, lookbackHours = 24): Promise<CodexSourceUsagePayload> => {
+  const params = new URLSearchParams();
+  params.set("lookbackHours", String(lookbackHours));
+  if (refresh) params.set("refresh", "true");
+  const response = await fetch(`/api/usage/codex-sources?${params.toString()}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as unknown));
+    const msg = (body as { error?: string }).error;
+    throw new Error(msg ?? `Failed to fetch codex source usage: ${response.status}`);
+  }
+  return response.json() as Promise<CodexSourceUsagePayload>;
+};
+
 export const fetchGcpBilling = async (refresh = false): Promise<GcpBillingPayload> => {
   const query = refresh ? "?refresh=true" : "";
   const response = await fetch(`/api/usage/gcp-billing${query}`);
@@ -229,3 +245,31 @@ export const deleteCredential = async (id: string): Promise<void> => {
     throw new Error(msg ?? `Failed to delete credential: ${response.status}`);
   }
 };
+
+export const fetchManagedApps = async (): Promise<ManagedAppsPayload> => {
+  const response = await fetch("/api/apps");
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as unknown));
+    const msg = (body as { error?: string }).error;
+    throw new Error(msg ?? `Failed to fetch apps: ${response.status}`);
+  }
+  return response.json() as Promise<ManagedAppsPayload>;
+};
+
+async function mutateApp(id: string, action: "start" | "stop" | "boot-enable" | "boot-disable"): Promise<ManagedApp> {
+  const response = await fetch(`/api/apps/${encodeURIComponent(id)}/${action}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as unknown));
+    const msg = (body as { error?: string }).error;
+    throw new Error(msg ?? `Failed to ${action} app: ${response.status}`);
+  }
+  const payload = (await response.json()) as { app: ManagedApp };
+  return payload.app;
+}
+
+export const startManagedApp = async (id: string): Promise<ManagedApp> => mutateApp(id, "start");
+export const stopManagedApp = async (id: string): Promise<ManagedApp> => mutateApp(id, "stop");
+export const enableManagedAppBoot = async (id: string): Promise<ManagedApp> => mutateApp(id, "boot-enable");
+export const disableManagedAppBoot = async (id: string): Promise<ManagedApp> => mutateApp(id, "boot-disable");
