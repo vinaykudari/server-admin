@@ -5,7 +5,6 @@ import { fetchGcpBilling } from "../services/api";
 import type {
   CodexAccountStatusPayload,
   CodexSourceUsagePayload,
-  CodexStatusLimit,
   GcpBillingPayload,
   GcpBillingServiceCost,
 } from "../types";
@@ -52,34 +51,6 @@ const getViewLetter = (view: ViewItem): string => {
   if (view.kind === "gcp") return "G";
   const label = getAccountLabel(view.account).trim();
   return label ? label[0]!.toUpperCase() : "A";
-};
-
-const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
-const pct = (n: number | null) => (typeof n === "number" && Number.isFinite(n) ? clamp(n, 0, 100) : null);
-
-const resetIn = (value: string | null | undefined, mode: "default" | "days" = "default") => {
-  if (!value) return USAGE_COPY.unknown;
-  const target = Date.parse(value);
-  if (!Number.isFinite(target)) return USAGE_COPY.unknown;
-
-  const diffMs = target - Date.now();
-  if (diffMs <= 0) return "now";
-
-  if (mode === "days") {
-    const days = diffMs / (24 * 60 * 60 * 1000);
-    if (days < 1) return "<1d";
-    if (days >= 10) return `${Math.round(days)}d`;
-    return `${days.toFixed(1)}d`;
-  }
-
-  const totalMinutes = Math.floor(diffMs / 60000);
-  if (totalMinutes <= 0) return "<1m";
-
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
 };
 
 const normalizeCost = (value: number) => {
@@ -132,44 +103,6 @@ type OpenClawAgentUsageRow = {
 const topServices = (data: GcpBillingPayload): GcpBillingServiceCost[] =>
   data.topServices.monthToDate.length > 0 ? data.topServices.monthToDate : data.topServices.last7d;
 
-const StatusOrb = ({
-  title,
-  limit,
-  className,
-  resetMode = "default",
-}: {
-  title: string;
-  limit: CodexStatusLimit;
-  className: string;
-  resetMode?: "default" | "days";
-}) => {
-  const percent = pct(limit.usedPercent);
-  const ring = percent == null ? 0 : percent;
-  const label = percent == null ? "--" : `${Math.round(percent)}%`;
-
-  return (
-    <section className={`statusOrb ${className}`} style={{ ["--ring" as string]: `${ring}%` }}>
-      <div className="statusOrb__head">
-        <div className="statusOrb__title">{title}</div>
-      </div>
-
-      <div className="statusOrb__body">
-        <div className="statusOrb__ring">
-          <div className="statusOrb__core">
-            <div className="statusOrb__value">{label}</div>
-            <div className="statusOrb__caption">used</div>
-          </div>
-        </div>
-
-        <div className="statusOrb__text">
-          <div className="statusOrb__resetLabel">Resets</div>
-          <div className="statusOrb__resetValue">in {resetIn(limit.resetsAt, resetMode)}</div>
-        </div>
-      </div>
-    </section>
-  );
-};
-
 function SourceUsageTable({
   sourceUsage,
   sourceUsageError,
@@ -179,10 +112,10 @@ function SourceUsageTable({
   sourceUsageError: string | null;
   currentAccount: CodexAccountStatusPayload;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
-    setExpanded(false);
+    setExpanded(true);
   }, [currentAccount.id]);
 
   const currentAccountRows = useMemo(
@@ -405,36 +338,8 @@ function CodexAccountView({
   sourceUsage: CodexSourceUsagePayload | null;
   sourceUsageError: string | null;
 }) {
-  const status = account.status;
-  const accountLabel = getAccountLabel(account);
-  const showFallback24h = !sourceUsage || !!sourceUsageError;
-
   return (
     <div className="usage">
-      <section className="usage__hero">
-        <div className="usage__heroBg" />
-        <div className="usage__meta">
-          <div className="usage__metaLabel">
-            {USAGE_COPY.accountMetaLabel}: {accountLabel}
-          </div>
-        </div>
-
-        {!status && <div className="state">{USAGE_COPY.accountStatusUnavailable}</div>}
-
-        {status && (
-          <>
-            <div className="usage__orbs">
-              <StatusOrb title="5-hour Limit" limit={status.limits.fiveHour} className="statusOrb--five" />
-              <StatusOrb title="Weekly Limit" limit={status.limits.weekly} className="statusOrb--week" resetMode="days" />
-            </div>
-            {showFallback24h && (
-              <div className="usage__miniStat">
-                24h: {formatTokenCount(account.usage24h.totalTokens)} tok • {account.usage24h.requests.toLocaleString()} req
-              </div>
-            )}
-          </>
-        )}
-      </section>
       <SourceUsageTable sourceUsage={sourceUsage} sourceUsageError={sourceUsageError} currentAccount={account} />
     </div>
   );
